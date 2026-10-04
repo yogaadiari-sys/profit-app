@@ -1,4 +1,4 @@
-name: Build & Test Profit Control V1
+name: Build Profit Control V1
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-and-test:
+  build:
     runs-on: ubuntu-latest
 
     steps:
@@ -56,7 +56,7 @@ jobs:
           }
           EOF
 
-          # 3. app/build.gradle.kts
+          # 3. app/build.gradle.kts (Konfigurasi Standar Stabil)
           cat << 'EOF' > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -80,9 +80,6 @@ jobs:
                       isMinifyEnabled = false
                       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
                   }
-                  debug {
-                      applicationIdSuffix = ""
-                  }
               }
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -90,7 +87,6 @@ jobs:
               }
               kotlinOptions {
                   jvmTarget = "17"
-                  freeCompilerArgs += listOf("-opt-in=androidx.compose.material3.ExperimentalMaterial3Api")
               }
               buildFeatures {
                   compose = true
@@ -289,18 +285,12 @@ jobs:
           import androidx.activity.ComponentActivity
           import androidx.activity.compose.setContent
           import androidx.compose.foundation.background
+          import androidx.compose.foundation.clickable
           import androidx.compose.foundation.layout.*
           import androidx.compose.foundation.lazy.LazyColumn
           import androidx.compose.foundation.lazy.items
           import androidx.compose.foundation.shape.RoundedCornerShape
           import androidx.compose.foundation.text.KeyboardOptions
-          import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.Add
-          import androidx.compose.material.icons.filled.Delete
-          import androidx.compose.material.icons.filled.Edit
-          import androidx.compose.material.icons.filled.Home
-          import androidx.compose.material.icons.filled.List
-          import androidx.compose.material.icons.filled.Settings
           import androidx.compose.material3.*
           import androidx.compose.runtime.*
           import androidx.compose.ui.Alignment
@@ -365,19 +355,30 @@ jobs:
                           tonalElevation = 8.dp
                       ) {
                           val items = listOf("Home", "Hitung", "Simulasi", "Produk", "Setting")
-                          val icons = listOf(
-                              Icons.Default.Home,
-                              Icons.Default.Add,
-                              Icons.Default.Edit,
-                              Icons.Default.List,
-                              Icons.Default.Settings
-                          )
                           items.forEachIndexed { index, label ->
                               NavigationBarItem(
                                   selected = selectedTab == index,
                                   onClick = { selectedTab = index },
-                                  icon = { Icon(icons[index], contentDescription = label) },
-                                  label = { Text(label, fontSize = 10.sp, maxLines = 1, fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal) },
+                                  icon = {
+                                      Text(
+                                          text = when(index) {
+                                              0 -> "📊"
+                                              1 -> "🧮"
+                                              2 -> "⚖️"
+                                              3 -> "📋"
+                                              else -> "⚙️"
+                                          },
+                                          fontSize = 18.sp
+                                      )
+                                  },
+                                  label = {
+                                      Text(
+                                          label,
+                                          fontSize = 11.sp,
+                                          maxLines = 1,
+                                          fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                                      )
+                                  },
                                   alwaysShowLabel = true
                               )
                           }
@@ -501,22 +502,18 @@ jobs:
                               colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006A60)),
                               shape = RoundedCornerShape(24.dp)
                           ) {
-                              Icon(Icons.Default.Add, contentDescription = null)
-                              Spacer(modifier = Modifier.width(6.dp))
-                              Text("Hitung Profit")
+                              Text("+ Hitung Profit")
                           }
                           OutlinedButton(
                               onClick = onNavigateSimulasi,
                               modifier = Modifier.weight(1f).height(48.dp),
                               shape = RoundedCornerShape(24.dp)
                           ) {
-                              Icon(Icons.Default.Edit, contentDescription = null)
-                              Spacer(modifier = Modifier.width(6.dp))
                               Text("Simulator")
                           }
                       }
                   }
-                  item { Spacer(modifier = Modifier.height(80.dp)) }
+                  item { Spacer(modifier = Modifier.height(90.dp)) }
               }
           }
 
@@ -587,7 +584,7 @@ jobs:
                       }
                   }
                   item {
-                      Text("Biaya Marketplace (Dapat Disesuaikan)", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray)
+                      Text("Biaya Marketplace", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray)
                   }
                   item {
                       Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -715,14 +712,14 @@ jobs:
                           }
                       }
                   }
-                  item { Spacer(modifier = Modifier.height(90.dp)) }
+                  item { Spacer(modifier = Modifier.height(100.dp)) }
               }
           }
 
           @Composable
           fun SimulatorScreen(products: List<ProductInput>) {
               var selectedProduct by remember { mutableStateOf(products.firstOrNull()) }
-              var expandedDropdown by remember { mutableStateOf(false) }
+              var showProductPicker by remember { mutableStateOf(false) }
 
               var simPrice by remember(selectedProduct) { mutableStateOf(selectedProduct?.sellingPrice?.toPlainString() ?: "100000") }
               var simFeePct by remember(selectedProduct) { mutableStateOf(selectedProduct?.marketplaceFeePercent?.toPlainString() ?: "8.0") }
@@ -762,31 +759,15 @@ jobs:
               LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                   item {
                       Text("Simulator Fee & Biaya", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                      Text("Pilih produk untuk menguji skenario perubahan harga atau kenaikan admin.", fontSize = 12.sp, color = Color.Gray)
+                      Text("Pilih produk untuk menguji skenario perubahan harga atau admin.", fontSize = 12.sp, color = Color.Gray)
                   }
                   item {
-                      Box(modifier = Modifier.fillMaxWidth()) {
-                          OutlinedButton(
-                              onClick = { expandedDropdown = true },
-                              modifier = Modifier.fillMaxWidth(),
-                              shape = RoundedCornerShape(8.dp)
-                          ) {
-                              Text("Target: ${selectedProduct?.name ?: "Pilih dari Produk Tersimpan"}")
-                          }
-                          DropdownMenu(
-                              expanded = expandedDropdown,
-                              onDismissRequest = { expandedDropdown = false }
-                          ) {
-                              products.forEach { prod ->
-                                  DropdownMenuItem(
-                                      text = { Text(prod.name) },
-                                      onClick = {
-                                          selectedProduct = prod
-                                          expandedDropdown = false
-                                      }
-                                  )
-                              }
-                          }
+                      OutlinedButton(
+                          onClick = { showProductPicker = true },
+                          modifier = Modifier.fillMaxWidth(),
+                          shape = RoundedCornerShape(8.dp)
+                      ) {
+                          Text("Target: ${selectedProduct?.name ?: "Pilih dari Produk Tersimpan"}")
                       }
                   }
                   item {
@@ -884,7 +865,33 @@ jobs:
                           }
                       }
                   }
-                  item { Spacer(modifier = Modifier.height(90.dp)) }
+                  item { Spacer(modifier = Modifier.height(100.dp)) }
+              }
+
+              if (showProductPicker) {
+                  AlertDialog(
+                      onDismissRequest = { showProductPicker = false },
+                      title = { Text("Pilih Produk Target") },
+                      text = {
+                          LazyColumn {
+                              items(products) { prod ->
+                                  ListItem(
+                                      headlineContent = { Text(prod.name) },
+                                      modifier = Modifier.clickable {
+                                          selectedProduct = prod
+                                          showProductPicker = false
+                                      }
+                                  )
+                              }
+                          }
+                      },
+                      confirmButton = {},
+                      dismissButton = {
+                          TextButton(onClick = { showProductPicker = false }) {
+                              Text("Batal")
+                          }
+                      }
+                  )
               }
           }
 
@@ -906,11 +913,17 @@ jobs:
 
                   Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                       listOf("SEMUA", "SEHAT", "TIPIS", "BONCOS").forEach { filter ->
-                          FilterChip(
-                              selected = selectedFilter == filter,
+                          Button(
                               onClick = { selectedFilter = filter },
-                              label = { Text(filter, fontSize = 11.sp) }
-                          )
+                              colors = ButtonDefaults.buttonColors(
+                                  containerColor = if (selectedFilter == filter) Color(0xFF006A60) else Color(0xFFE0E0E0),
+                                  contentColor = if (selectedFilter == filter) Color.White else Color.Black
+                              ),
+                              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                              shape = RoundedCornerShape(16.dp)
+                          ) {
+                              Text(filter, fontSize = 11.sp)
+                          }
                       }
                   }
                   Spacer(modifier = Modifier.height(10.dp))
@@ -947,8 +960,8 @@ jobs:
                                       Text("Harga: ${formatRupiah(prod.sellingPrice)} | Margin: ${res.netProfitMarginPercent}%", fontSize = 13.sp, color = Color.Gray)
                                       Text("Net Profit: ${formatRupiah(res.netProfit)}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = if (res.status == "BONCOS") Color.Red else Color(0xFF2E7D32))
                                       Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                          IconButton(onClick = { onDelete(prod) }) {
-                                              Icon(Icons.Default.Delete, contentDescription = "Hapus", tint = Color.Red)
+                                          TextButton(onClick = { onDelete(prod) }) {
+                                              Text("Hapus", color = Color.Red, fontSize = 12.sp)
                                           }
                                       }
                                   }
@@ -1062,7 +1075,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y gradle
           gradle wrapper --gradle-version 8.4
           chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload Verified APK Artifact
         uses: actions/upload-artifact@v4
