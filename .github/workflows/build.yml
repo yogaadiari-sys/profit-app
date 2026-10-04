@@ -19,9 +19,11 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v3
+
     - name: Inject Full Profit Control V1 Implementation
       run: |
-        # Buat seluruh direktori yang dibutuhkan agar tidak ada error No such file or directory
         mkdir -p app/src/main/java/com/profitcontrol/app
         mkdir -p app/src/test/java/com/profitcontrol/app
 
@@ -945,11 +947,14 @@ jobs:
         }
         EOF
 
-    - name: Grant execute permission for gradlew
-      run: chmod +x gradlew
-
-    - name: Build Debug APK with Gradle
-      run: ./gradlew assembleDebug
+    - name: Build Debug APK
+      run: |
+        if [ -f "./gradlew" ]; then
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
+        else
+          gradle assembleDebug
+        fi
 
     - name: Upload APK to Artifacts
       uses: actions/upload-artifact@v4
