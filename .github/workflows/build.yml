@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Profit Control V1
 
 on:
   push:
@@ -10,154 +10,945 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      - name: Extract Project ZIP
-        run: |
-          unzip -o ProfitControl_V1_Project.zip -d .
+    - name: Setup Java JDK
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
 
-      - name: Apply Fix to MainActivity
-        run: |
-          cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
-          package com.profitcontrol.app
+    - name: Inject Full Profit Control V1 Implementation
+      run: |
+        # 1. Update app/build.gradle.kts to include Gson
+        cat << 'EOF' > app/build.gradle.kts
+        plugins {
+            alias(libs.plugins.android.application)
+            alias(libs.plugins.kotlin.android)
+            alias(libs.plugins.kotlin.compose)
+        }
 
-          import android.os.Bundle
-          import androidx.activity.ComponentActivity
-          import androidx.activity.compose.setContent
-          import androidx.compose.foundation.layout.*
-          import androidx.compose.foundation.lazy.LazyColumn
-          import androidx.compose.foundation.lazy.items
-          import androidx.compose.material3.*
-          import androidx.compose.runtime.*
-          import androidx.compose.ui.Modifier
-          import androidx.compose.ui.unit.dp
-          import java.math.BigDecimal
+        android {
+            namespace = "com.profitcontrol.app"
+            compileSdk = 34
 
-          data class Product(
-              val name: String,
-              val cost: BigDecimal,
-              val price: BigDecimal
-          )
+            defaultConfig {
+                applicationId = "com.profitcontrol.app"
+                minSdk = 24
+                targetSdk = 34
+                versionCode = 1
+                versionName = "1.0.0"
 
-          class MainActivity : ComponentActivity() {
-              override fun onCreate(savedInstanceState: Bundle?) {
-                  super.onCreate(savedInstanceState)
-                  setContent {
-                      MaterialTheme {
-                          Surface(
-                              modifier = Modifier.fillMaxSize(),
-                              color = MaterialTheme.colorScheme.background
-                          ) {
-                              ProfitScreen()
-                          }
-                      }
-                  }
-              }
-          }
+                testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+            }
 
-          @OptIn(ExperimentalMaterial3Api::class)
-          @Composable
-          fun ProfitScreen() {
-              var productName by remember { mutableStateOf("") }
-              var costInput by remember { mutableStateOf("") }
-              var priceInput by remember { mutableStateOf("") }
-              var productList by remember { mutableStateOf(listOf<Product>()) }
+            buildTypes {
+                release {
+                    isMinifyEnabled = false
+                    proguardFiles(
+                        getDefaultProguardFile("proguard-android-optimize.txt"),
+                        "proguard-rules.pro"
+                    )
+                }
+            }
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_11
+                targetCompatibility = JavaVersion.VERSION_11
+            }
+            kotlinOptions {
+                jvmTarget = "11"
+            }
+            buildFeatures {
+                compose = true
+            }
+        }
 
-              Column(
-                  modifier = Modifier
-                      .fillMaxSize()
-                      .padding(16.dp)
-              ) {
-                  Text(
-                      text = "Profit Control",
-                      style = MaterialTheme.typography.headlineMedium
-                  )
+        dependencies {
+            implementation(libs.androidx.core.ktx)
+            implementation(libs.androidx.lifecycle.runtime.ktx)
+            implementation(libs.androidx.activity.compose)
+            implementation(platform(libs.androidx.compose.bom))
+            implementation(libs.androidx.compose.ui)
+            implementation(libs.androidx.compose.ui.graphics)
+            implementation(libs.androidx.compose.ui.tooling.preview)
+            implementation(libs.androidx.compose.material3)
+            implementation("androidx.compose.material:material-icons-extended")
+            implementation("com.google.code.gson:gson:2.10.1")
 
-                  Spacer(modifier = Modifier.height(16.dp))
+            testImplementation(libs.junit)
+            androidTestImplementation(libs.androidx.junit)
+            androidTestImplementation(libs.androidx.espresso.core)
+            androidTestImplementation(platform(libs.androidx.compose.bom))
+            androidTestImplementation(libs.androidx.compose.ui.test.junit4)
+            debugImplementation(libs.androidx.compose.ui.tooling)
+            debugImplementation(libs.androidx.compose.ui.test.manifest)
+        }
+        EOF
 
-                  OutlinedTextField(
-                      value = productName,
-                      onValueChange = { productName = it },
-                      label = { Text("Nama Produk") },
-                      modifier = Modifier.fillMaxWidth()
-                  )
+        # 2. Update MainActivity.kt with complete V1 logic, BigDecimal, Persistence & UI
+        cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
+        package com.profitcontrol.app
 
-                  Spacer(modifier = Modifier.height(8.dp))
+        import android.content.Context
+        import android.os.Bundle
+        import android.widget.Toast
+        import androidx.activity.ComponentActivity
+        import androidx.activity.compose.setContent
+        import androidx.compose.foundation.layout.*
+        import androidx.compose.foundation.lazy.LazyColumn
+        import androidx.compose.foundation.lazy.items
+        import androidx.compose.foundation.rememberScrollState
+        import androidx.compose.foundation.text.KeyboardOptions
+        import androidx.compose.foundation.verticalScroll
+        import androidx.compose.material.icons.Icons
+        import androidx.compose.material.icons.filled.*
+        import androidx.compose.material3.*
+        import androidx.compose.runtime.*
+        import androidx.compose.ui.Alignment
+        import androidx.compose.ui.Modifier
+        import androidx.compose.ui.graphics.Color
+        import androidx.compose.ui.platform.LocalContext
+        import androidx.compose.ui.text.font.FontWeight
+        import androidx.compose.ui.text.input.KeyboardType
+        import androidx.compose.ui.unit.dp
+        import androidx.compose.ui.unit.sp
+        import com.google.gson.Gson
+        import com.google.gson.GsonBuilder
+        import com.google.gson.reflect.TypeToken
+        import java.io.File
+        import java.io.FileOutputStream
+        import java.math.BigDecimal
+        import java.math.RoundingMode
+        import java.text.NumberFormat
+        import java.util.Locale
+        import java.util.UUID
 
-                  OutlinedTextField(
-                      value = costInput,
-                      onValueChange = { costInput = it },
-                      label = { Text("Harga Modal (Cost)") },
-                      modifier = Modifier.fillMaxWidth()
-                  )
+        enum class ProfitStatus {
+            SEHAT, TIPIS, BONCOS
+        }
 
-                  Spacer(modifier = Modifier.height(8.dp))
+        data class ProductEntity(
+            val id: String = UUID.randomUUID().toString(),
+            val name: String,
+            val sellingPrice: BigDecimal,
+            val unitsSold: Int,
+            val cogs: BigDecimal,
+            val packaging: BigDecimal,
+            val marketplaceFeePercent: BigDecimal,
+            val marketplaceFixedFee: BigDecimal,
+            val voucher: BigDecimal,
+            val affiliatePercent: BigDecimal,
+            val adsPerOrder: BigDecimal,
+            val otherCostPerOrder: BigDecimal,
+            val createdAt: Long = System.currentTimeMillis()
+        )
 
-                  OutlinedTextField(
-                      value = priceInput,
-                      onValueChange = { priceInput = it },
-                      label = { Text("Harga Jual (Price)") },
-                      modifier = Modifier.fillMaxWidth()
-                  )
+        data class CalculationResult(
+            val marketplaceFeeNominal: BigDecimal,
+            val affiliateNominal: BigDecimal,
+            val totalCostPerOrder: BigDecimal,
+            val netProfitPerOrder: BigDecimal,
+            val totalNetProfit: BigDecimal,
+            val marginPercent: BigDecimal,
+            val status: ProfitStatus,
+            val profitBeforeAds: BigDecimal,
+            val bepRoas: BigDecimal?,
+            val maxSafeAds: BigDecimal,
+            val maxSafeAffiliatePercent: BigDecimal?,
+            val minSellingPrice: BigDecimal?
+        )
 
-                  Spacer(modifier = Modifier.height(16.dp))
+        object ProfitEngine {
+            private val HUNDRED = BigDecimal("100")
+            private val ZERO = BigDecimal.ZERO
 
-                  Button(
-                      onClick = {
-                          val cost = costInput.toBigDecimalOrNull() ?: BigDecimal.ZERO
-                          val price = priceInput.toBigDecimalOrNull() ?: BigDecimal.ZERO
-                          if (productName.isNotBlank()) {
-                              productList = productList + Product(productName, cost, price)
-                              productName = ""
-                              costInput = ""
-                              priceInput = ""
-                          }
-                      },
-                      modifier = Modifier.fillMaxWidth()
-                  ) {
-                      Text("Tambah Produk")
-                  }
+            fun calculate(
+                sellingPrice: BigDecimal,
+                unitsSold: Int,
+                cogs: BigDecimal,
+                packaging: BigDecimal,
+                feePercent: BigDecimal,
+                fixedFee: BigDecimal,
+                voucher: BigDecimal,
+                affiliatePercent: BigDecimal,
+                adsPerOrder: BigDecimal,
+                otherCost: BigDecimal,
+                targetMarginPercent: BigDecimal = BigDecimal("20.0")
+            ): CalculationResult {
+                val safePrice = sellingPrice.max(ZERO)
+                val safeUnits = BigDecimal(unitsSold.coerceAtLeast(1))
 
-                  Spacer(modifier = Modifier.height(16.dp))
+                val feeNominal = safePrice.multiply(feePercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
+                val affNominal = safePrice.multiply(affiliatePercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
 
-                  LazyColumn(
-                      modifier = Modifier.fillMaxSize()
-                  ) {
-                      items(productList) { product ->
-                          Card(
-                              modifier = Modifier
-                                  .fillMaxWidth()
-                                  .padding(vertical = 4.dp)
-                          ) {
-                              Column(modifier = Modifier.padding(12.dp)) {
-                                  Text(text = product.name, style = MaterialTheme.typography.titleMedium)
-                                  val profit = product.price - product.cost
-                                  Text(text = "Profit: $profit", style = MaterialTheme.typography.bodyMedium)
-                              }
-                          }
-                      }
-                  }
-              }
-          }
-          EOF
+                val nonAdCost = cogs.add(packaging).add(feeNominal).add(fixedFee).add(voucher).add(affNominal).add(otherCost)
+                val totalCost = nonAdCost.add(adsPerOrder)
+                val profitPerOrder = safePrice.subtract(totalCost)
+                val totalNetProfit = profitPerOrder.multiply(safeUnits)
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+                val margin = if (safePrice.compareTo(ZERO) > 0) {
+                    profitPerOrder.multiply(HUNDRED).divide(safePrice, 2, RoundingMode.HALF_UP)
+                } else {
+                    ZERO
+                }
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.9'
+                val status = when {
+                    profitPerOrder.compareTo(ZERO) <= 0 -> ProfitStatus.BONCOS
+                    margin.compareTo(targetMarginPercent) >= 0 -> ProfitStatus.SEHAT
+                    else -> ProfitStatus.TIPIS
+                }
 
-      - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace
+                val profitBeforeAds = safePrice.subtract(nonAdCost)
+                val bepRoas = if (profitBeforeAds.compareTo(ZERO) > 0) {
+                    safePrice.divide(profitBeforeAds, 2, RoundingMode.HALF_UP)
+                } else {
+                    null
+                }
 
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ProfitControl-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+                val targetProfitNominal = safePrice.multiply(targetMarginPercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
+                val maxSafeAds = safePrice.subtract(nonAdCost).subtract(targetProfitNominal).max(ZERO)
+
+                val costsWithoutAff = cogs.add(packaging).add(feeNominal).add(fixedFee).add(voucher).add(adsPerOrder).add(otherCost)
+                val remainingForAff = safePrice.subtract(costsWithoutAff).subtract(targetProfitNominal)
+                val maxSafeAffiliate = if (safePrice.compareTo(ZERO) > 0 && remainingForAff.compareTo(ZERO) > 0) {
+                    remainingForAff.multiply(HUNDRED).divide(safePrice, 2, RoundingMode.HALF_UP)
+                } else {
+                    ZERO
+                }
+
+                val fixedCosts = cogs.add(packaging).add(fixedFee).add(voucher).add(adsPerOrder).add(otherCost)
+                val denominator = HUNDRED.subtract(feePercent).subtract(affiliatePercent).subtract(targetMarginPercent)
+                val minPrice = if (denominator.compareTo(ZERO) > 0) {
+                    fixedCosts.multiply(HUNDRED).divide(denominator, 2, RoundingMode.HALF_UP)
+                } else {
+                    null
+                }
+
+                return CalculationResult(
+                    marketplaceFeeNominal = feeNominal,
+                    affiliateNominal = affNominal,
+                    totalCostPerOrder = totalCost,
+                    netProfitPerOrder = profitPerOrder,
+                    totalNetProfit = totalNetProfit,
+                    marginPercent = margin,
+                    status = status,
+                    profitBeforeAds = profitBeforeAds,
+                    bepRoas = bepRoas,
+                    maxSafeAds = maxSafeAds,
+                    maxSafeAffiliatePercent = maxSafeAffiliate,
+                    minSellingPrice = minPrice
+                )
+            }
+        }
+
+        data class AppSettings(
+            val defaultTargetMargin: BigDecimal = BigDecimal("20.0")
+        )
+
+        data class BackupPayload(
+            val version: Int = 1,
+            val settings: AppSettings,
+            val products: List<ProductEntity>
+        )
+
+        class ProfitRepository(private val context: Context) {
+            private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
+            private val productsFile = File(context.filesDir, "profit_control_products.json")
+            private val settingsFile = File(context.filesDir, "profit_control_settings.json")
+
+            @Synchronized
+            fun getProducts(): List<ProductEntity> {
+                if (!productsFile.exists()) return emptyList()
+                return try {
+                    val json = productsFile.readText()
+                    val type = object : TypeToken<List<ProductEntity>>() {}.type
+                    gson.fromJson<List<ProductEntity>>(json, type) ?: emptyList()
+                } catch (e: Exception) {
+                    emptyList()
+                }
+            }
+
+            @Synchronized
+            fun saveProduct(product: ProductEntity) {
+                val current = getProducts().toMutableList()
+                val index = current.indexOfFirst { it.id == product.id }
+                if (index >= 0) current[index] = product else current.add(0, product)
+                writeAtomic(productsFile, gson.toJson(current))
+            }
+
+            @Synchronized
+            fun deleteProduct(productId: String) {
+                val current = getProducts().toMutableList()
+                current.removeAll { it.id == productId }
+                writeAtomic(productsFile, gson.toJson(current))
+            }
+
+            @Synchronized
+            fun getSettings(): AppSettings {
+                if (!settingsFile.exists()) return AppSettings()
+                return try {
+                    val json = settingsFile.readText()
+                    gson.fromJson(json, AppSettings::class.java) ?: AppSettings()
+                } catch (e: Exception) {
+                    AppSettings()
+                }
+            }
+
+            @Synchronized
+            fun saveSettings(settings: AppSettings) {
+                writeAtomic(settingsFile, gson.toJson(settings))
+            }
+
+            @Synchronized
+            fun createBackupJson(): String = gson.toJson(BackupPayload(settings = getSettings(), products = getProducts()))
+
+            @Synchronized
+            fun restoreFromJson(json: String): Boolean {
+                return try {
+                    val payload = gson.fromJson(json, BackupPayload::class.java)
+                    if (payload != null && payload.products != null) {
+                        writeAtomic(settingsFile, gson.toJson(payload.settings ?: AppSettings()))
+                        writeAtomic(productsFile, gson.toJson(payload.products))
+                        true
+                    } else false
+                } catch (e: Exception) {
+                    false
+                }
+            }
+
+            private fun writeAtomic(targetFile: File, content: String) {
+                val temp = File.createTempFile("pc_tmp", ".tmp", context.filesDir)
+                FileOutputStream(temp).use { it.write(content.toByteArray()) }
+                if (targetFile.exists()) targetFile.delete()
+                temp.renameTo(targetFile)
+            }
+        }
+
+        fun formatRupiah(amount: BigDecimal): String {
+            val formatter = NumberFormat.getCurrencyInstance(Locale("in", "ID"))
+            formatter.maximumFractionDigits = 0
+            return formatter.format(amount)
+        }
+
+        class MainActivity : ComponentActivity() {
+            private lateinit var repository: ProfitRepository
+
+            override fun onCreate(savedInstanceState: Bundle?) {
+                super.onCreate(savedInstanceState)
+                repository = ProfitRepository(applicationContext)
+
+                setContent {
+                    MaterialTheme(
+                        colorScheme = lightColorScheme(
+                            primary = Color(0xFF0F766E),
+                            secondary = Color(0xFF14B8A6),
+                            tertiary = Color(0xFF0284C7),
+                            background = Color(0xFFF8FAFC),
+                            surface = Color.White
+                        )
+                    ) {
+                        MainAppScaffold(repository = repository)
+                    }
+                }
+            }
+        }
+
+        @OptIn(ExperimentalMaterial3Api::class)
+        @Composable
+        fun MainAppScaffold(repository: ProfitRepository) {
+            var currentTab by remember { mutableStateOf(0) }
+            var products by remember { mutableStateOf(repository.getProducts()) }
+            var settings by remember { mutableStateOf(repository.getSettings()) }
+            var productToEdit by remember { mutableStateOf<ProductEntity?>(null) }
+
+            fun refreshData() {
+                products = repository.getProducts()
+                settings = repository.getSettings()
+            }
+
+            Scaffold(
+                topBar = {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text("PROFIT CONTROL", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                Text("Omzet besar belum tentu untung.", fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f))
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                            titleContentColor = Color.White
+                        )
+                    )
+                },
+                bottomBar = {
+                    NavigationBar(containerColor = Color.White) {
+                        NavigationBarItem(
+                            selected = currentTab == 0,
+                            onClick = { currentTab = 0 },
+                            icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
+                            label = { Text("Dashboard") }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == 1,
+                            onClick = { productToEdit = null; currentTab = 1 },
+                            icon = { Icon(Icons.Default.Calculate, contentDescription = null) },
+                            label = { Text("Hitung") }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == 2,
+                            onClick = { currentTab = 2 },
+                            icon = { Icon(Icons.Default.Tune, contentDescription = null) },
+                            label = { Text("Simulator") }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == 3,
+                            onClick = { currentTab = 3 },
+                            icon = { Icon(Icons.Default.ListAlt, contentDescription = null) },
+                            label = { Text("Produk") }
+                        )
+                        NavigationBarItem(
+                            selected = currentTab == 4,
+                            onClick = { currentTab = 4 },
+                            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                            label = { Text("Settings") }
+                        )
+                    }
+                }
+            ) { padding ->
+                Box(modifier = Modifier.padding(padding)) {
+                    when (currentTab) {
+                        0 -> DashboardScreen(products, settings) { currentTab = it }
+                        1 -> ProfitCheckScreen(repository, settings, productToEdit) { refreshData(); currentTab = 3 }
+                        2 -> SimulatorScreen(products, settings)
+                        3 -> ProductListScreen(products, settings, onDelete = { repository.deleteProduct(it); refreshData() }) {
+                            productToEdit = it
+                            currentTab = 1
+                        }
+                        4 -> SettingsScreen(repository, settings) { refreshData() }
+                    }
+                }
+            }
+        }
+
+        @Composable
+        fun DashboardScreen(products: List<ProductEntity>, settings: AppSettings, onNav: (Int) -> Unit) {
+            val analyzed = products.map { p ->
+                val res = ProfitEngine.calculate(
+                    p.sellingPrice, p.unitsSold, p.cogs, p.packaging,
+                    p.marketplaceFeePercent, p.marketplaceFixedFee, p.voucher,
+                    p.affiliatePercent, p.adsPerOrder, p.otherCostPerOrder, settings.defaultTargetMargin
+                )
+                Pair(p, res)
+            }
+
+            val totalProfit = analyzed.fold(BigDecimal.ZERO) { acc, item -> acc.add(item.second.totalNetProfit) }
+            val bestProd = analyzed.maxByOrNull { it.second.netProfitPerOrder }
+            val needAttention = analyzed.count { it.second.status != ProfitStatus.SEHAT }
+
+            Column(
+                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Text("Ringkasan Profit Anda", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFDCFCE7))) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Total Net Profit", fontSize = 11.sp, color = Color(0xFF166534))
+                            Text(formatRupiah(totalProfit), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF166534))
+                        }
+                    }
+                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF))) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Total Produk", fontSize = 11.sp, color = Color(0xFF1E40AF))
+                            Text("${products.size} Produk", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E40AF))
+                        }
+                    }
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7))) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Perlu Perhatian", fontSize = 11.sp, color = Color(0xFFB45309))
+                            Text("$needAttention Item", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
+                        }
+                    }
+                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9))) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text("Profit Tertinggi", fontSize = 11.sp, color = Color.Gray)
+                            Text(bestProd?.first?.name ?: "-", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(8.dp))
+                Text("Aksi Cepat", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Button(
+                        onClick = { onNav(1) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Hitung Profit")
+                    }
+                    OutlinedButton(onClick = { onNav(2) }, modifier = Modifier.weight(1f)) {
+                        Icon(Icons.Default.Tune, contentDescription = null)
+                        Spacer(Modifier.width(4.dp))
+                        Text("Simulator")
+                    }
+                }
+            }
+        }
+
+        @Composable
+        fun ProfitCheckScreen(
+            repository: ProfitRepository,
+            settings: AppSettings,
+            editingProduct: ProductEntity?,
+            onSaved: () -> Unit
+        ) {
+            val context = LocalContext.current
+            val scrollState = rememberScrollState()
+
+            var name by remember { mutableStateOf(editingProduct?.name ?: "") }
+            var price by remember { mutableStateOf(editingProduct?.sellingPrice?.toPlainString() ?: "100000") }
+            var units by remember { mutableStateOf(editingProduct?.unitsSold?.toString() ?: "1") }
+            var cogs by remember { mutableStateOf(editingProduct?.cogs?.toPlainString() ?: "45000") }
+            var packaging by remember { mutableStateOf(editingProduct?.packaging?.toPlainString() ?: "2000") }
+            var feePercent by remember { mutableStateOf(editingProduct?.marketplaceFeePercent?.toPlainString() ?: "8.0") }
+            var fixedFee by remember { mutableStateOf(editingProduct?.marketplaceFixedFee?.toPlainString() ?: "1250") }
+            var voucher by remember { mutableStateOf(editingProduct?.voucher?.toPlainString() ?: "0") }
+            var affiliatePercent by remember { mutableStateOf(editingProduct?.affiliatePercent?.toPlainString() ?: "5.0") }
+            var ads by remember { mutableStateOf(editingProduct?.adsPerOrder?.toPlainString() ?: "5000") }
+            var otherCost by remember { mutableStateOf(editingProduct?.otherCostPerOrder?.toPlainString() ?: "0") }
+
+            fun toBd(s: String): BigDecimal = s.replace(",", ".").toBigDecimalOrNull() ?: BigDecimal.ZERO
+
+            val result = ProfitEngine.calculate(
+                sellingPrice = toBd(price),
+                unitsSold = units.toIntOrNull() ?: 1,
+                cogs = toBd(cogs),
+                packaging = toBd(packaging),
+                feePercent = toBd(feePercent),
+                fixedFee = toBd(fixedFee),
+                voucher = toBd(voucher),
+                affiliatePercent = toBd(affiliatePercent),
+                adsPerOrder = toBd(ads),
+                otherCost = toBd(otherCost),
+                targetMarginPercent = settings.defaultTargetMargin
+            )
+
+            Column(
+                modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Text(if (editingProduct != null) "Edit Produk" else "Hitung Profit Produk", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nama Produk *") }, modifier = Modifier.fillMaxWidth())
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Harga Jual (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = units, onValueChange = { units = it }, label = { Text("Estimasi Unit") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = cogs, onValueChange = { cogs = it }, label = { Text("HPP / Modal (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = packaging, onValueChange = { packaging = it }, label = { Text("Packing (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                }
+
+                Text("Biaya Marketplace (Bebas Diubah)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = feePercent, onValueChange = { feePercent = it }, label = { Text("Fee (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = fixedFee, onValueChange = { fixedFee = it }, label = { Text("Fixed Fee (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                }
+
+                Text("Promosi & Iklan", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = affiliatePercent, onValueChange = { affiliatePercent = it }, label = { Text("Affiliate (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = ads, onValueChange = { ads = it }, label = { Text("Iklan / Order (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = voucher, onValueChange = { voucher = it }, label = { Text("Voucher (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = otherCost, onValueChange = { otherCost = it }, label = { Text("Biaya Lain (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
+                }
+
+                val (bgCard, textCard) = when (result.status) {
+                    ProfitStatus.SEHAT -> Pair(Color(0xFFDCFCE7), Color(0xFF166534))
+                    ProfitStatus.TIPIS -> Pair(Color(0xFFFEF3C7), Color(0xFFB45309))
+                    ProfitStatus.BONCOS -> Pair(Color(0xFFFEE2E2), Color(0xFF991B1B))
+                }
+
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = bgCard)) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                            Text("STATUS PRODUK:", fontWeight = FontWeight.Bold, color = textCard)
+                            Badge(containerColor = textCard) {
+                                Text(result.status.name, color = Color.White, modifier = Modifier.padding(4.dp), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Text("Net Profit / Order: ${formatRupiah(result.netProfitPerOrder)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = textCard)
+                        Text("Total Net Profit (${units} unit): ${formatRupiah(result.totalNetProfit)}", fontWeight = FontWeight.SemiBold)
+                        Text("Margin: ${result.marginPercent}% (Target Sehat: ${settings.defaultTargetMargin}%)")
+                        Text("Total Seluruh Biaya: ${formatRupiah(result.totalCostPerOrder)}")
+                    }
+                }
+
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), border = CardDefaults.outlinedCardBorder()) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("BATAS AMAN (SAFE LIMITS)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        if (result.bepRoas != null) {
+                            Text("• BEP ROAS Minimum: ${result.bepRoas}x")
+                        } else {
+                            Text("• BEP ROAS: Boncos sebelum iklan!", color = Color.Red)
+                        }
+                        Text("• Batas Maksimal Iklan: ${formatRupiah(result.maxSafeAds)}")
+                        result.maxSafeAffiliatePercent?.let { Text("• Batas Maksimal Affiliate: $it%") }
+                        result.minSellingPrice?.let { Text("• Harga Jual Minimum: ${formatRupiah(it)}") }
+                    }
+                }
+
+                Button(
+                    onClick = {
+                        if (name.isBlank()) {
+                            Toast.makeText(context, "Nama produk tidak boleh kosong!", Toast.LENGTH_SHORT).show()
+                            return@Button
+                        }
+                        repository.saveProduct(
+                            ProductEntity(
+                                id = editingProduct?.id ?: UUID.randomUUID().toString(),
+                                name = name.trim(),
+                                sellingPrice = toBd(price),
+                                unitsSold = units.toIntOrNull() ?: 1,
+                                cogs = toBd(cogs),
+                                packaging = toBd(packaging),
+                                marketplaceFeePercent = toBd(feePercent),
+                                marketplaceFixedFee = toBd(fixedFee),
+                                voucher = toBd(voucher),
+                                affiliatePercent = toBd(affiliatePercent),
+                                adsPerOrder = toBd(ads),
+                                otherCostPerOrder = toBd(otherCost)
+                            )
+                        )
+                        Toast.makeText(context, "Produk berhasil disimpan!", Toast.LENGTH_SHORT).show()
+                        onSaved()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Simpan Produk")
+                }
+            }
+        }
+
+        @Composable
+        fun SimulatorScreen(products: List<ProductEntity>, settings: AppSettings) {
+            val scrollState = rememberScrollState()
+            val base = products.firstOrNull()
+
+            var simPrice by remember { mutableStateOf(base?.sellingPrice?.toPlainString() ?: "100000") }
+            var simFeePercent by remember { mutableStateOf(base?.marketplaceFeePercent?.toPlainString() ?: "8.0") }
+            var simFixedFee by remember { mutableStateOf(base?.marketplaceFixedFee?.toPlainString() ?: "1250") }
+            var simAffiliate by remember { mutableStateOf(base?.affiliatePercent?.toPlainString() ?: "5.0") }
+            var simAds by remember { mutableStateOf(base?.adsPerOrder?.toPlainString() ?: "5000") }
+
+            fun toBd(s: String): BigDecimal = s.replace(",", ".").toBigDecimalOrNull() ?: BigDecimal.ZERO
+
+            val before = ProfitEngine.calculate(
+                sellingPrice = base?.sellingPrice ?: BigDecimal("100000"),
+                unitsSold = 1,
+                cogs = base?.cogs ?: BigDecimal("50000"),
+                packaging = base?.packaging ?: BigDecimal("2000"),
+                feePercent = base?.marketplaceFeePercent ?: BigDecimal("8.0"),
+                fixedFee = base?.marketplaceFixedFee ?: BigDecimal("1250"),
+                voucher = base?.voucher ?: BigDecimal.ZERO,
+                affiliatePercent = base?.affiliatePercent ?: BigDecimal("5.0"),
+                adsPerOrder = base?.adsPerOrder ?: BigDecimal("5000"),
+                otherCost = base?.otherCostPerOrder ?: BigDecimal.ZERO,
+                targetMarginPercent = settings.defaultTargetMargin
+            )
+
+            val after = ProfitEngine.calculate(
+                sellingPrice = toBd(simPrice),
+                unitsSold = 1,
+                cogs = base?.cogs ?: BigDecimal("50000"),
+                packaging = base?.packaging ?: BigDecimal("2000"),
+                feePercent = toBd(simFeePercent),
+                fixedFee = toBd(simFixedFee),
+                voucher = base?.voucher ?: BigDecimal.ZERO,
+                affiliatePercent = toBd(simAffiliate),
+                adsPerOrder = toBd(simAds),
+                otherCost = base?.otherCostPerOrder ?: BigDecimal.ZERO,
+                targetMarginPercent = settings.defaultTargetMargin
+            )
+
+            val diff = after.netProfitPerOrder.subtract(before.netProfitPerOrder)
+
+            Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("Simulator Fee & Biaya", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                OutlinedTextField(value = simPrice, onValueChange = { simPrice = it }, label = { Text("Harga Simulasi (Rp)") }, modifier = Modifier.fillMaxWidth())
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = simFeePercent, onValueChange = { simFeePercent = it }, label = { Text("Fee (%)") }, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = simFixedFee, onValueChange = { simFixedFee = it }, label = { Text("Fixed Fee (Rp)") }, modifier = Modifier.weight(1f))
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = simAffiliate, onValueChange = { simAffiliate = it }, label = { Text("Affiliate (%)") }, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = simAds, onValueChange = { simAds = it }, label = { Text("Iklan (Rp)") }, modifier = Modifier.weight(1f))
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9))) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text("SEBELUM", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.Gray)
+                            Text(formatRupiah(before.netProfitPerOrder), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                            Text("Margin: ${before.marginPercent}%", fontSize = 12.sp)
+                            Text("Status: ${before.status.name}", fontSize = 12.sp)
+                        }
+                    }
+                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF))) {
+                        Column(modifier = Modifier.padding(10.dp)) {
+                            Text("SESUDAH", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF1E40AF))
+                            Text(formatRupiah(after.netProfitPerOrder), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1E40AF))
+                            Text("Margin: ${after.marginPercent}%", fontSize = 12.sp)
+                            Text("Status: ${after.status.name}", fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = if (diff >= BigDecimal.ZERO) Color(0xFFDCFCE7) else Color(0xFFFEE2E2))
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("DAMPAK PERUBAHAN", fontWeight = FontWeight.Bold)
+                        Text("Selisih Net Profit: ${if (diff >= BigDecimal.ZERO) "+" else ""}${formatRupiah(diff)}", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        @Composable
+        fun ProductListScreen(
+            products: List<ProductEntity>,
+            settings: AppSettings,
+            onDelete: (String) -> Unit,
+            onEdit: (ProductEntity) -> Unit
+        ) {
+            var filter by remember { mutableStateOf("SEMUA") }
+            var detailPair by remember { mutableStateOf<Pair<ProductEntity, CalculationResult>?>(null) }
+
+            val list = products.map { p ->
+                val res = ProfitEngine.calculate(
+                    p.sellingPrice, p.unitsSold, p.cogs, p.packaging,
+                    p.marketplaceFeePercent, p.marketplaceFixedFee, p.voucher,
+                    p.affiliatePercent, p.adsPerOrder, p.otherCostPerOrder, settings.defaultTargetMargin
+                )
+                Pair(p, res)
+            }
+
+            val filtered = list.filter {
+                when (filter) {
+                    "SEHAT" -> it.second.status == ProfitStatus.SEHAT
+                    "TIPIS" -> it.second.status == ProfitStatus.TIPIS
+                    "BONCOS" -> it.second.status == ProfitStatus.BONCOS
+                    else -> true
+                }
+            }
+
+            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
+                Text("Daftar Produk (${filtered.size})", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(8.dp))
+
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("SEMUA", "SEHAT", "TIPIS", "BONCOS").forEach { f ->
+                        FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f, fontSize = 11.sp) })
+                    }
+                }
+
+                LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(filtered, key = { it.first.id }) { (prod, res) ->
+                        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), border = CardDefaults.outlinedCardBorder()) {
+                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(prod.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                    val badgeColor = when (res.status) {
+                                        ProfitStatus.SEHAT -> Color(0xFF166534)
+                                        ProfitStatus.TIPIS -> Color(0xFFB45309)
+                                        ProfitStatus.BONCOS -> Color(0xFF991B1B)
+                                    }
+                                    Badge(containerColor = badgeColor) {
+                                        Text(res.status.name, color = Color.White, modifier = Modifier.padding(3.dp), fontSize = 10.sp)
+                                    }
+                                }
+                                Text("Harga: ${formatRupiah(prod.sellingPrice)} | Margin: ${res.marginPercent}%", fontSize = 13.sp)
+                                Text("Net Profit: ${formatRupiah(res.netProfitPerOrder)}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    TextButton(onClick = { detailPair = Pair(prod, res) }) { Text("Detail") }
+                                    TextButton(onClick = { onEdit(prod) }) { Text("Edit") }
+                                    IconButton(onClick = { onDelete(prod.id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            detailPair?.let { (p, r) ->
+                AlertDialog(
+                    onDismissRequest = { detailPair = null },
+                    title = { Text(p.name) },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Harga: ${formatRupiah(p.sellingPrice)}")
+                            Text("HPP: ${formatRupiah(p.cogs)}")
+                            Text("Fee Marketplace: ${p.marketplaceFeePercent}% (${formatRupiah(r.marketplaceFeeNominal)})")
+                            Text("Fixed Fee: ${formatRupiah(p.marketplaceFixedFee)}")
+                            Text("Affiliate: ${p.affiliatePercent}% (${formatRupiah(r.affiliateNominal)})")
+                            Text("Iklan / Order: ${formatRupiah(p.adsPerOrder)}")
+                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                            Text("Total Biaya: ${formatRupiah(r.totalCostPerOrder)}", fontWeight = FontWeight.Bold)
+                            Text("Net Profit / Order: ${formatRupiah(r.netProfitPerOrder)}", fontWeight = FontWeight.Bold)
+                            r.bepRoas?.let { Text("BEP ROAS: ${it}x") }
+                        }
+                    },
+                    confirmButton = { TextButton(onClick = { detailPair = null }) { Text("Tutup") } }
+                )
+            }
+        }
+
+        @Composable
+        fun SettingsScreen(repository: ProfitRepository, settings: AppSettings, onUpdated: () -> Unit) {
+            val context = LocalContext.current
+            var marginInput by remember { mutableStateOf(settings.defaultTargetMargin.toPlainString()) }
+            var backupJson by remember { mutableStateOf<String?>(null) }
+            var showRestore by remember { mutableStateOf(false) }
+            var restoreText by remember { mutableStateOf("") }
+
+            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Text("Pengaturan", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Target Margin Default (%)", fontWeight = FontWeight.SemiBold)
+                        OutlinedTextField(value = marginInput, onValueChange = { marginInput = it }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+                        Button(onClick = {
+                            val m = marginInput.replace(",", ".").toBigDecimalOrNull() ?: BigDecimal("20.0")
+                            repository.saveSettings(settings.copy(defaultTargetMargin = m))
+                            Toast.makeText(context, "Target margin tersimpan", Toast.LENGTH_SHORT).show()
+                            onUpdated()
+                        }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
+                            Text("Simpan Target")
+                        }
+                    }
+                }
+
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("Backup & Restore (Offline)", fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(onClick = { backupJson = repository.createBackupJson() }, modifier = Modifier.weight(1f)) {
+                                Text("Backup Data")
+                            }
+                            OutlinedButton(onClick = { showRestore = true }, modifier = Modifier.weight(1f)) {
+                                Text("Restore Data")
+                            }
+                        }
+                    }
+                }
+
+                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9))) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text("Profit Control V1.0.0", fontWeight = FontWeight.Bold)
+                        Text("Semua data tersimpan otomatis di memori internal HP Anda. Data tidak akan hilang saat aplikasi ditutup.", fontSize = 12.sp, color = Color.Gray)
+                    }
+                }
+            }
+
+            backupJson?.let { json ->
+                AlertDialog(
+                    onDismissRequest = { backupJson = null },
+                    title = { Text("Backup Selesai") },
+                    text = {
+                        OutlinedTextField(value = json, onValueChange = {}, readOnly = true, modifier = Modifier.height(180.dp))
+                    },
+                    confirmButton = { TextButton(onClick = { backupJson = null }) { Text("Salin & Tutup") } }
+                )
+            }
+
+            if (showRestore) {
+                AlertDialog(
+                    onDismissRequest = { showRestore = false },
+                    title = { Text("Restore Data") },
+                    text = {
+                        OutlinedTextField(value = restoreText, onValueChange = { restoreText = it }, label = { Text("Tempel JSON Backup") }, modifier = Modifier.height(150.dp))
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            if (repository.restoreFromJson(restoreText)) {
+                                Toast.makeText(context, "Data berhasil dipulihkan!", Toast.LENGTH_SHORT).show()
+                                onUpdated()
+                                showRestore = false
+                            } else {
+                                Toast.makeText(context, "JSON tidak valid!", Toast.LENGTH_SHORT).show()
+                            }
+                        }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
+                            Text("Restore Sekarang")
+                        }
+                    },
+                    dismissButton = { TextButton(onClick = { showRestore = false }) { Text("Batal") } }
+                )
+            }
+        }
+        EOF
+
+        # 3. Update Unit Test to avoid compile error
+        cat << 'EOF' > app/src/test/java/com/profitcontrol/app/ProfitCalculatorTest.kt
+        package com.profitcontrol.app
+
+        import org.junit.Assert.*
+        import org.junit.Test
+        import java.math.BigDecimal
+
+        class ProfitCalculatorTest {
+            @Test
+            fun testBasicProfit() {
+                val res = ProfitEngine.calculate(
+                    sellingPrice = BigDecimal("100000"),
+                    unitsSold = 1,
+                    cogs = BigDecimal("50000"),
+                    packaging = BigDecimal.ZERO,
+                    feePercent = BigDecimal.ZERO,
+                    fixedFee = BigDecimal.ZERO,
+                    voucher = BigDecimal.ZERO,
+                    affiliatePercent = BigDecimal.ZERO,
+                    adsPerOrder = BigDecimal.ZERO,
+                    otherCost = BigDecimal.ZERO
+                )
+                assertEquals(BigDecimal("50000.00"), res.netProfitPerOrder.setScale(2))
+                assertEquals(ProfitStatus.SEHAT, res.status)
+            }
+        }
+        EOF
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build Debug APK with Gradle
+      run: ./gradlew assembleDebug
+
+    - name: Upload APK to Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ProfitControl-V1-Complete
+        path: app/build/outputs/apk/debug/app-debug.apk
