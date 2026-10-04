@@ -1,982 +1,619 @@
-name: Build Profit Control V1
+name: Build & Test Profit Control V1
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "master" ]
   workflow_dispatch:
 
 jobs:
-  build:
+  build-and-test:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Setup Java JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-
-    - name: Accept Android SDK Licenses
-      run: |
-        yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v3
-
-    - name: Scaffold Project and Inject Complete V1
-      run: |
-        # 1. Properties
-        cat << 'EOF' > gradle.properties
-        org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-        android.useAndroidX=true
-        android.nonTransitiveRClass=true
-        EOF
-
-        # 2. Settings
-        cat << 'EOF' > settings.gradle.kts
-        pluginManagement {
-            repositories {
-                google()
-                mavenCentral()
-                gradlePluginPortal()
-            }
-        }
-        dependencyResolutionManagement {
-            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-            repositories {
-                google()
-                mavenCentral()
-            }
-        }
-        rootProject.name = "ProfitControl"
-        include(":app")
-        EOF
-
-        # 3. Root build file
-        cat << 'EOF' > build.gradle.kts
-        plugins {
-            id("com.android.application") version "8.2.2" apply false
-            id("org.jetbrains.kotlin.android") version "1.9.22" apply false
-        }
-        EOF
-
-        # 4. Folder structure & Manifest
-        mkdir -p app/src/main/java/com/profitcontrol/app
-
-        cat << 'EOF' > app/src/main/AndroidManifest.xml
-        <?xml version="1.0" encoding="utf-8"?>
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-            <application
-                android:allowBackup="true"
-                android:icon="@android:drawable/sym_def_app_icon"
-                android:label="Profit Control"
-                android:roundIcon="@android:drawable/sym_def_app_icon"
-                android:supportsRtl="true"
-                android:theme="@android:style/Theme.Material.Light.NoActionBar">
-                <activity
-                    android:name=".MainActivity"
-                    android:exported="true"
-                    android:theme="@android:style/Theme.Material.Light.NoActionBar">
-                    <intent-filter>
-                        <action android:name="android.intent.action.MAIN" />
-                        <category android:name="android.intent.category.LAUNCHER" />
-                    </intent-filter>
-                </activity>
-            </application>
-        </manifest>
-        EOF
-
-        # 5. App build file
-        cat << 'EOF' > app/build.gradle.kts
-        plugins {
-            id("com.android.application")
-            id("org.jetbrains.kotlin.android")
-        }
-
-        android {
-            namespace = "com.profitcontrol.app"
-            compileSdk = 34
-
-            defaultConfig {
-                applicationId = "com.profitcontrol.app"
-                minSdk = 24
-                targetSdk = 34
-                versionCode = 1
-                versionName = "1.0.0"
-            }
-
-            buildTypes {
-                release {
-                    isMinifyEnabled = false
-                }
-            }
-            compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_17
-                targetCompatibility = JavaVersion.VERSION_17
-            }
-            kotlinOptions {
-                jvmTarget = "17"
-            }
-            buildFeatures {
-                compose = true
-            }
-            composeOptions {
-                kotlinCompilerExtensionVersion = "1.5.8"
-            }
-        }
-
-        dependencies {
-            val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
-            implementation(composeBom)
-            implementation("androidx.core:core-ktx:1.12.0")
-            implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-            implementation("androidx.activity:activity-compose:1.8.2")
-            implementation("androidx.compose.ui:ui")
-            implementation("androidx.compose.ui:ui-graphics")
-            implementation("androidx.compose.material3:material3")
-            implementation("androidx.compose.material:material-icons-extended")
-            implementation("com.google.code.gson:gson:2.10.1")
-        }
-        EOF
-
-        # 6. MainActivity (V1 Full Source)
-        cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
-        package com.profitcontrol.app
-
-        import android.content.Context
-        import android.os.Bundle
-        import android.widget.Toast
-        import androidx.activity.ComponentActivity
-        import androidx.activity.compose.setContent
-        import androidx.compose.foundation.layout.*
-        import androidx.compose.foundation.lazy.LazyColumn
-        import androidx.compose.foundation.lazy.items
-        import androidx.compose.foundation.rememberScrollState
-        import androidx.compose.foundation.text.KeyboardOptions
-        import androidx.compose.foundation.verticalScroll
-        import androidx.compose.material.icons.Icons
-        import androidx.compose.material.icons.filled.*
-        import androidx.compose.material3.*
-        import androidx.compose.runtime.*
-        import androidx.compose.ui.Alignment
-        import androidx.compose.ui.Modifier
-        import androidx.compose.ui.graphics.Color
-        import androidx.compose.ui.platform.LocalContext
-        import androidx.compose.ui.text.font.FontWeight
-        import androidx.compose.ui.text.input.KeyboardType
-        import androidx.compose.ui.unit.dp
-        import androidx.compose.ui.unit.sp
-        import com.google.gson.Gson
-        import com.google.gson.GsonBuilder
-        import com.google.gson.reflect.TypeToken
-        import java.io.File
-        import java.io.FileOutputStream
-        import java.math.BigDecimal
-        import java.math.RoundingMode
-        import java.text.NumberFormat
-        import java.util.Locale
-        import java.util.UUID
-
-        enum class ProfitStatus {
-            SEHAT, TIPIS, BONCOS
-        }
-
-        data class ProductEntity(
-            val id: String = UUID.randomUUID().toString(),
-            val name: String,
-            val sellingPrice: BigDecimal,
-            val unitsSold: Int,
-            val cogs: BigDecimal,
-            val packaging: BigDecimal,
-            val marketplaceFeePercent: BigDecimal,
-            val marketplaceFixedFee: BigDecimal,
-            val voucher: BigDecimal,
-            val affiliatePercent: BigDecimal,
-            val adsPerOrder: BigDecimal,
-            val otherCostPerOrder: BigDecimal,
-            val createdAt: Long = System.currentTimeMillis()
-        )
-
-        data class CalculationResult(
-            val marketplaceFeeNominal: BigDecimal,
-            val affiliateNominal: BigDecimal,
-            val totalCostPerOrder: BigDecimal,
-            val netProfitPerOrder: BigDecimal,
-            val totalNetProfit: BigDecimal,
-            val marginPercent: BigDecimal,
-            val status: ProfitStatus,
-            val profitBeforeAds: BigDecimal,
-            val bepRoas: BigDecimal?,
-            val maxSafeAds: BigDecimal,
-            val maxSafeAffiliatePercent: BigDecimal?,
-            val minSellingPrice: BigDecimal?
-        )
-
-        object ProfitEngine {
-            private val HUNDRED = BigDecimal("100")
-            private val ZERO = BigDecimal.ZERO
-
-            fun calculate(
-                sellingPrice: BigDecimal,
-                unitsSold: Int,
-                cogs: BigDecimal,
-                packaging: BigDecimal,
-                feePercent: BigDecimal,
-                fixedFee: BigDecimal,
-                voucher: BigDecimal,
-                affiliatePercent: BigDecimal,
-                adsPerOrder: BigDecimal,
-                otherCost: BigDecimal,
-                targetMarginPercent: BigDecimal = BigDecimal("20.0")
-            ): CalculationResult {
-                val safePrice = sellingPrice.max(ZERO)
-                val safeUnits = BigDecimal(unitsSold.coerceAtLeast(1))
-
-                val feeNominal = safePrice.multiply(feePercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
-                val affNominal = safePrice.multiply(affiliatePercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
-
-                val nonAdCost = cogs.add(packaging).add(feeNominal).add(fixedFee).add(voucher).add(affNominal).add(otherCost)
-                val totalCost = nonAdCost.add(adsPerOrder)
-                val profitPerOrder = safePrice.subtract(totalCost)
-                val totalNetProfit = profitPerOrder.multiply(safeUnits)
-
-                val margin = if (safePrice.compareTo(ZERO) > 0) {
-                    profitPerOrder.multiply(HUNDRED).divide(safePrice, 2, RoundingMode.HALF_UP)
-                } else {
-                    ZERO
-                }
-
-                val status = when {
-                    profitPerOrder.compareTo(ZERO) <= 0 -> ProfitStatus.BONCOS
-                    margin.compareTo(targetMarginPercent) >= 0 -> ProfitStatus.SEHAT
-                    else -> ProfitStatus.TIPIS
-                }
-
-                val profitBeforeAds = safePrice.subtract(nonAdCost)
-                val bepRoas = if (profitBeforeAds.compareTo(ZERO) > 0) {
-                    safePrice.divide(profitBeforeAds, 2, RoundingMode.HALF_UP)
-                } else {
-                    null
-                }
-
-                val targetProfitNominal = safePrice.multiply(targetMarginPercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
-                val maxSafeAds = safePrice.subtract(nonAdCost).subtract(targetProfitNominal).max(ZERO)
-
-                val costsWithoutAff = cogs.add(packaging).add(feeNominal).add(fixedFee).add(voucher).add(adsPerOrder).add(otherCost)
-                val remainingForAff = safePrice.subtract(costsWithoutAff).subtract(targetProfitNominal)
-                val maxSafeAffiliate = if (safePrice.compareTo(ZERO) > 0 && remainingForAff.compareTo(ZERO) > 0) {
-                    remainingForAff.multiply(HUNDRED).divide(safePrice, 2, RoundingMode.HALF_UP)
-                } else {
-                    ZERO
-                }
-
-                val fixedCosts = cogs.add(packaging).add(fixedFee).add(voucher).add(adsPerOrder).add(otherCost)
-                val denominator = HUNDRED.subtract(feePercent).subtract(affiliatePercent).subtract(targetMarginPercent)
-                val minPrice = if (denominator.compareTo(ZERO) > 0) {
-                    fixedCosts.multiply(HUNDRED).divide(denominator, 2, RoundingMode.HALF_UP)
-                } else {
-                    null
-                }
-
-                return CalculationResult(
-                    marketplaceFeeNominal = feeNominal,
-                    affiliateNominal = affNominal,
-                    totalCostPerOrder = totalCost,
-                    netProfitPerOrder = profitPerOrder,
-                    totalNetProfit = totalNetProfit,
-                    marginPercent = margin,
-                    status = status,
-                    profitBeforeAds = profitBeforeAds,
-                    bepRoas = bepRoas,
-                    maxSafeAds = maxSafeAds,
-                    maxSafeAffiliatePercent = maxSafeAffiliate,
-                    minSellingPrice = minPrice
-                )
-            }
-        }
-
-        data class AppSettings(
-            val defaultTargetMargin: BigDecimal = BigDecimal("20.0")
-        )
-
-        data class BackupPayload(
-            val version: Int = 1,
-            val settings: AppSettings,
-            val products: List<ProductEntity>
-        )
-
-        class ProfitRepository(private val context: Context) {
-            private val gson: Gson = GsonBuilder().setPrettyPrinting().create()
-            private val productsFile = File(context.filesDir, "profit_control_products.json")
-            private val settingsFile = File(context.filesDir, "profit_control_settings.json")
-
-            @Synchronized
-            fun getProducts(): List<ProductEntity> {
-                if (!productsFile.exists()) return emptyList()
-                return try {
-                    val json = productsFile.readText()
-                    val type = object : TypeToken<List<ProductEntity>>() {}.type
-                    gson.fromJson<List<ProductEntity>>(json, type) ?: emptyList()
-                } catch (e: Exception) {
-                    emptyList()
-                }
-            }
-
-            @Synchronized
-            fun saveProduct(product: ProductEntity) {
-                val current = getProducts().toMutableList()
-                val index = current.indexOfFirst { it.id == product.id }
-                if (index >= 0) current[index] = product else current.add(0, product)
-                writeAtomic(productsFile, gson.toJson(current))
-            }
-
-            @Synchronized
-            fun deleteProduct(productId: String) {
-                val current = getProducts().toMutableList()
-                current.removeAll { it.id == productId }
-                writeAtomic(productsFile, gson.toJson(current))
-            }
-
-            @Synchronized
-            fun getSettings(): AppSettings {
-                if (!settingsFile.exists()) return AppSettings()
-                return try {
-                    val json = settingsFile.readText()
-                    gson.fromJson(json, AppSettings::class.java) ?: AppSettings()
-                } catch (e: Exception) {
-                    AppSettings()
-                }
-            }
-
-            @Synchronized
-            fun saveSettings(settings: AppSettings) {
-                writeAtomic(settingsFile, gson.toJson(settings))
-            }
-
-            @Synchronized
-            fun createBackupJson(): String = gson.toJson(BackupPayload(settings = getSettings(), products = getProducts()))
-
-            @Synchronized
-            fun restoreFromJson(json: String): Boolean {
-                return try {
-                    val payload = gson.fromJson(json, BackupPayload::class.java)
-                    if (payload != null && payload.products != null) {
-                        writeAtomic(settingsFile, gson.toJson(payload.settings ?: AppSettings()))
-                        writeAtomic(productsFile, gson.toJson(payload.products))
-                        true
-                    } else false
-                } catch (e: Exception) {
-                    false
-                }
-            }
-
-            private fun writeAtomic(targetFile: File, content: String) {
-                val temp = File.createTempFile("pc_tmp", ".tmp", context.filesDir)
-                FileOutputStream(temp).use { it.write(content.toByteArray()) }
-                if (targetFile.exists()) targetFile.delete()
-                temp.renameTo(targetFile)
-            }
-        }
-
-        fun formatRupiah(amount: BigDecimal): String {
-            val formatter = NumberFormat.getCurrencyInstance(Locale("in", "ID"))
-            formatter.maximumFractionDigits = 0
-            return formatter.format(amount)
-        }
-
-        class MainActivity : ComponentActivity() {
-            private lateinit var repository: ProfitRepository
-
-            override fun onCreate(savedInstanceState: Bundle?) {
-                super.onCreate(savedInstanceState)
-                repository = ProfitRepository(applicationContext)
-
-                setContent {
-                    MaterialTheme(
-                        colorScheme = lightColorScheme(
-                            primary = Color(0xFF0F766E),
-                            secondary = Color(0xFF14B8A6),
-                            tertiary = Color(0xFF0284C7),
-                            background = Color(0xFFF8FAFC),
-                            surface = Color.White
-                        )
-                    ) {
-                        MainAppScaffold(repository = repository)
-                    }
-                }
-            }
-        }
-
-        @OptIn(ExperimentalMaterial3Api::class)
-        @Composable
-        fun MainAppScaffold(repository: ProfitRepository) {
-            var currentTab by remember { mutableStateOf(0) }
-            var products by remember { mutableStateOf(repository.getProducts()) }
-            var settings by remember { mutableStateOf(repository.getSettings()) }
-            var productToEdit by remember { mutableStateOf<ProductEntity?>(null) }
-
-            fun refreshData() {
-                products = repository.getProducts()
-                settings = repository.getSettings()
-            }
-
-            Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = {
-                            Column {
-                                Text("PROFIT CONTROL", fontWeight = FontWeight.Bold, fontSize = 18.sp)
-                                Text("Omzet besar belum tentu untung.", fontSize = 11.sp, color = Color.White.copy(alpha = 0.85f))
-                            }
-                        },
-                        colors = TopAppBarDefaults.topAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                            titleContentColor = Color.White
-                        )
-                    )
-                },
-                bottomBar = {
-                    NavigationBar(containerColor = Color.White) {
-                        NavigationBarItem(
-                            selected = currentTab == 0,
-                            onClick = { currentTab = 0 },
-                            icon = { Icon(Icons.Default.Dashboard, contentDescription = null) },
-                            label = { Text("Dashboard") }
-                        )
-                        NavigationBarItem(
-                            selected = currentTab == 1,
-                            onClick = { productToEdit = null; currentTab = 1 },
-                            icon = { Icon(Icons.Default.Calculate, contentDescription = null) },
-                            label = { Text("Hitung") }
-                        )
-                        NavigationBarItem(
-                            selected = currentTab == 2,
-                            onClick = { currentTab = 2 },
-                            icon = { Icon(Icons.Default.Tune, contentDescription = null) },
-                            label = { Text("Simulator") }
-                        )
-                        NavigationBarItem(
-                            selected = currentTab == 3,
-                            onClick = { currentTab = 3 },
-                            icon = { Icon(Icons.Default.ListAlt, contentDescription = null) },
-                            label = { Text("Produk") }
-                        )
-                        NavigationBarItem(
-                            selected = currentTab == 4,
-                            onClick = { currentTab = 4 },
-                            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                            label = { Text("Settings") }
-                        )
-                    }
-                }
-            ) { padding ->
-                Box(modifier = Modifier.padding(padding)) {
-                    when (currentTab) {
-                        0 -> DashboardScreen(products, settings) { currentTab = it }
-                        1 -> ProfitCheckScreen(repository, settings, productToEdit) { refreshData(); currentTab = 3 }
-                        2 -> SimulatorScreen(products, settings)
-                        3 -> ProductListScreen(products, settings, onDelete = { repository.deleteProduct(it); refreshData() }) {
-                            productToEdit = it
-                            currentTab = 1
-                        }
-                        4 -> SettingsScreen(repository, settings) { refreshData() }
-                    }
-                }
-            }
-        }
-
-        @Composable
-        fun DashboardScreen(products: List<ProductEntity>, settings: AppSettings, onNav: (Int) -> Unit) {
-            val analyzed = products.map { p ->
-                val res = ProfitEngine.calculate(
-                    p.sellingPrice, p.unitsSold, p.cogs, p.packaging,
-                    p.marketplaceFeePercent, p.marketplaceFixedFee, p.voucher,
-                    p.affiliatePercent, p.adsPerOrder, p.otherCostPerOrder, settings.defaultTargetMargin
-                )
-                Pair(p, res)
-            }
-
-            val totalProfit = analyzed.fold(BigDecimal.ZERO) { acc, item -> acc.add(item.second.totalNetProfit) }
-            val bestProd = analyzed.maxByOrNull { it.second.netProfitPerOrder }
-            val needAttention = analyzed.count { it.second.status != ProfitStatus.SEHAT }
-
-            Column(
-                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Text("Ringkasan Profit Anda", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFDCFCE7))) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Total Net Profit", fontSize = 11.sp, color = Color(0xFF166534))
-                            Text(formatRupiah(totalProfit), fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF166534))
-                        }
-                    }
-                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF))) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Total Produk", fontSize = 11.sp, color = Color(0xFF1E40AF))
-                            Text("${products.size} Produk", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1E40AF))
-                        }
-                    }
-                }
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFFEF3C7))) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Perlu Perhatian", fontSize = 11.sp, color = Color(0xFFB45309))
-                            Text("$needAttention Item", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color(0xFFB45309))
-                        }
-                    }
-                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9))) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            Text("Profit Tertinggi", fontSize = 11.sp, color = Color.Gray)
-                            Text(bestProd?.first?.name ?: "-", fontSize = 14.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(8.dp))
-                Text("Aksi Cepat", fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        onClick = { onNav(1) },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                    ) {
-                        Icon(Icons.Default.Add, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Hitung Profit")
-                    }
-                    OutlinedButton(onClick = { onNav(2) }, modifier = Modifier.weight(1f)) {
-                        Icon(Icons.Default.Tune, contentDescription = null)
-                        Spacer(Modifier.width(4.dp))
-                        Text("Simulator")
-                    }
-                }
-            }
-        }
-
-        @Composable
-        fun ProfitCheckScreen(
-            repository: ProfitRepository,
-            settings: AppSettings,
-            editingProduct: ProductEntity?,
-            onSaved: () -> Unit
-        ) {
-            val context = LocalContext.current
-            val scrollState = rememberScrollState()
-
-            var name by remember { mutableStateOf(editingProduct?.name ?: "") }
-            var price by remember { mutableStateOf(editingProduct?.sellingPrice?.toPlainString() ?: "100000") }
-            var units by remember { mutableStateOf(editingProduct?.unitsSold?.toString() ?: "1") }
-            var cogs by remember { mutableStateOf(editingProduct?.cogs?.toPlainString() ?: "45000") }
-            var packaging by remember { mutableStateOf(editingProduct?.packaging?.toPlainString() ?: "2000") }
-            var feePercent by remember { mutableStateOf(editingProduct?.marketplaceFeePercent?.toPlainString() ?: "8.0") }
-            var fixedFee by remember { mutableStateOf(editingProduct?.marketplaceFixedFee?.toPlainString() ?: "1250") }
-            var voucher by remember { mutableStateOf(editingProduct?.voucher?.toPlainString() ?: "0") }
-            var affiliatePercent by remember { mutableStateOf(editingProduct?.affiliatePercent?.toPlainString() ?: "5.0") }
-            var ads by remember { mutableStateOf(editingProduct?.adsPerOrder?.toPlainString() ?: "5000") }
-            var otherCost by remember { mutableStateOf(editingProduct?.otherCostPerOrder?.toPlainString() ?: "0") }
-
-            fun toBd(s: String): BigDecimal = s.replace(",", ".").toBigDecimalOrNull() ?: BigDecimal.ZERO
-
-            val result = ProfitEngine.calculate(
-                sellingPrice = toBd(price),
-                unitsSold = units.toIntOrNull() ?: 1,
-                cogs = toBd(cogs),
-                packaging = toBd(packaging),
-                feePercent = toBd(feePercent),
-                fixedFee = toBd(fixedFee),
-                voucher = toBd(voucher),
-                affiliatePercent = toBd(affiliatePercent),
-                adsPerOrder = toBd(ads),
-                otherCost = toBd(otherCost),
-                targetMarginPercent = settings.defaultTargetMargin
-            )
-
-            Column(
-                modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Text(if (editingProduct != null) "Edit Produk" else "Hitung Profit Produk", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nama Produk *") }, modifier = Modifier.fillMaxWidth())
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Harga Jual (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = units, onValueChange = { units = it }, label = { Text("Estimasi Unit") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = cogs, onValueChange = { cogs = it }, label = { Text("HPP / Modal (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = packaging, onValueChange = { packaging = it }, label = { Text("Packing (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                }
-
-                Text("Biaya Marketplace (Bebas Diubah)", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = feePercent, onValueChange = { feePercent = it }, label = { Text("Fee (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = fixedFee, onValueChange = { fixedFee = it }, label = { Text("Fixed Fee (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                }
-
-                Text("Promosi & Iklan", fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = affiliatePercent, onValueChange = { affiliatePercent = it }, label = { Text("Affiliate (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = ads, onValueChange = { ads = it }, label = { Text("Iklan / Order (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = voucher, onValueChange = { voucher = it }, label = { Text("Voucher (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = otherCost, onValueChange = { otherCost = it }, label = { Text("Biaya Lain (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f))
-                }
-
-                val (bgCard, textCard) = when (result.status) {
-                    ProfitStatus.SEHAT -> Pair(Color(0xFFDCFCE7), Color(0xFF166534))
-                    ProfitStatus.TIPIS -> Pair(Color(0xFFFEF3C7), Color(0xFFB45309))
-                    ProfitStatus.BONCOS -> Pair(Color(0xFFFEE2E2), Color(0xFF991B1B))
-                }
-
-                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = bgCard)) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Text("STATUS PRODUK:", fontWeight = FontWeight.Bold, color = textCard)
-                            Badge(containerColor = textCard) {
-                                Text(result.status.name, color = Color.White, modifier = Modifier.padding(4.dp), fontWeight = FontWeight.Bold)
-                            }
-                        }
-                        Text("Net Profit / Order: ${formatRupiah(result.netProfitPerOrder)}", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = textCard)
-                        Text("Total Net Profit (${units} unit): ${formatRupiah(result.totalNetProfit)}", fontWeight = FontWeight.SemiBold)
-                        Text("Margin: ${result.marginPercent}% (Target Sehat: ${settings.defaultTargetMargin}%)")
-                        Text("Total Seluruh Biaya: ${formatRupiah(result.totalCostPerOrder)}")
-                    }
-                }
-
-                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), border = CardDefaults.outlinedCardBorder()) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("BATAS AMAN (SAFE LIMITS)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                        if (result.bepRoas != null) {
-                            Text("• BEP ROAS Minimum: ${result.bepRoas}x")
-                        } else {
-                            Text("• BEP ROAS: Boncos sebelum iklan!", color = Color.Red)
-                        }
-                        Text("• Batas Maksimal Iklan: ${formatRupiah(result.maxSafeAds)}")
-                        result.maxSafeAffiliatePercent?.let { Text("• Batas Maksimal Affiliate: $it%") }
-                        result.minSellingPrice?.let { Text("• Harga Jual Minimum: ${formatRupiah(it)}") }
-                    }
-                }
-
-                Button(
-                    onClick = {
-                        if (name.isBlank()) {
-                            Toast.makeText(context, "Nama produk tidak boleh kosong!", Toast.LENGTH_SHORT).show()
-                            return@Button
-                        }
-                        repository.saveProduct(
-                            ProductEntity(
-                                id = editingProduct?.id ?: UUID.randomUUID().toString(),
-                                name = name.trim(),
-                                sellingPrice = toBd(price),
-                                unitsSold = units.toIntOrNull() ?: 1,
-                                cogs = toBd(cogs),
-                                packaging = toBd(packaging),
-                                marketplaceFeePercent = toBd(feePercent),
-                                marketplaceFixedFee = toBd(fixedFee),
-                                voucher = toBd(voucher),
-                                affiliatePercent = toBd(affiliatePercent),
-                                adsPerOrder = toBd(ads),
-                                otherCostPerOrder = toBd(otherCost)
-                            )
-                        )
-                        Toast.makeText(context, "Produk berhasil disimpan!", Toast.LENGTH_SHORT).show()
-                        onSaved()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
-                ) {
-                    Text("Simpan Produk")
-                }
-            }
-        }
-
-        @Composable
-        fun SimulatorScreen(products: List<ProductEntity>, settings: AppSettings) {
-            val scrollState = rememberScrollState()
-            val base = products.firstOrNull()
-
-            var simPrice by remember { mutableStateOf(base?.sellingPrice?.toPlainString() ?: "100000") }
-            var simFeePercent by remember { mutableStateOf(base?.marketplaceFeePercent?.toPlainString() ?: "8.0") }
-            var simFixedFee by remember { mutableStateOf(base?.marketplaceFixedFee?.toPlainString() ?: "1250") }
-            var simAffiliate by remember { mutableStateOf(base?.affiliatePercent?.toPlainString() ?: "5.0") }
-            var simAds by remember { mutableStateOf(base?.adsPerOrder?.toPlainString() ?: "5000") }
-
-            fun toBd(s: String): BigDecimal = s.replace(",", ".").toBigDecimalOrNull() ?: BigDecimal.ZERO
-
-            val before = ProfitEngine.calculate(
-                sellingPrice = base?.sellingPrice ?: BigDecimal("100000"),
-                unitsSold = 1,
-                cogs = base?.cogs ?: BigDecimal("50000"),
-                packaging = base?.packaging ?: BigDecimal("2000"),
-                feePercent = base?.marketplaceFeePercent ?: BigDecimal("8.0"),
-                fixedFee = base?.marketplaceFixedFee ?: BigDecimal("1250"),
-                voucher = base?.voucher ?: BigDecimal.ZERO,
-                affiliatePercent = base?.affiliatePercent ?: BigDecimal("5.0"),
-                adsPerOrder = base?.adsPerOrder ?: BigDecimal("5000"),
-                otherCost = base?.otherCostPerOrder ?: BigDecimal.ZERO,
-                targetMarginPercent = settings.defaultTargetMargin
-            )
-
-            val after = ProfitEngine.calculate(
-                sellingPrice = toBd(simPrice),
-                unitsSold = 1,
-                cogs = base?.cogs ?: BigDecimal("50000"),
-                packaging = base?.packaging ?: BigDecimal("2000"),
-                feePercent = toBd(simFeePercent),
-                fixedFee = toBd(simFixedFee),
-                voucher = base?.voucher ?: BigDecimal.ZERO,
-                affiliatePercent = toBd(simAffiliate),
-                adsPerOrder = toBd(simAds),
-                otherCost = base?.otherCostPerOrder ?: BigDecimal.ZERO,
-                targetMarginPercent = settings.defaultTargetMargin
-            )
-
-            val diff = after.netProfitPerOrder.subtract(before.netProfitPerOrder)
-
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("Simulator Fee & Biaya", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                OutlinedTextField(value = simPrice, onValueChange = { simPrice = it }, label = { Text("Harga Simulasi (Rp)") }, modifier = Modifier.fillMaxWidth())
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = simFeePercent, onValueChange = { simFeePercent = it }, label = { Text("Fee (%)") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = simFixedFee, onValueChange = { simFixedFee = it }, label = { Text("Fixed Fee (Rp)") }, modifier = Modifier.weight(1f))
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(value = simAffiliate, onValueChange = { simAffiliate = it }, label = { Text("Affiliate (%)") }, modifier = Modifier.weight(1f))
-                    OutlinedTextField(value = simAds, onValueChange = { simAds = it }, label = { Text("Iklan (Rp)") }, modifier = Modifier.weight(1f))
-                }
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9))) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Text("SEBELUM", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color.Gray)
-                            Text(formatRupiah(before.netProfitPerOrder), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Text("Margin: ${before.marginPercent}%", fontSize = 12.sp)
-                            Text("Status: ${before.status.name}", fontSize = 12.sp)
-                        }
-                    }
-                    Card(modifier = Modifier.weight(1f), colors = CardDefaults.cardColors(containerColor = Color(0xFFEFF6FF))) {
-                        Column(modifier = Modifier.padding(10.dp)) {
-                            Text("SESUDAH", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = Color(0xFF1E40AF))
-                            Text(formatRupiah(after.netProfitPerOrder), fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1E40AF))
-                            Text("Margin: ${after.marginPercent}%", fontSize = 12.sp)
-                            Text("Status: ${after.status.name}", fontSize = 12.sp)
-                        }
-                    }
-                }
-
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = if (diff >= BigDecimal.ZERO) Color(0xFFDCFCE7) else Color(0xFFFEE2E2))
-                ) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("DAMPAK PERUBAHAN", fontWeight = FontWeight.Bold)
-                        Text("Selisih Net Profit: ${if (diff >= BigDecimal.ZERO) "+" else ""}${formatRupiah(diff)}", fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
-        @Composable
-        fun ProductListScreen(
-            products: List<ProductEntity>,
-            settings: AppSettings,
-            onDelete: (String) -> Unit,
-            onEdit: (ProductEntity) -> Unit
-        ) {
-            var filter by remember { mutableStateOf("SEMUA") }
-            var detailPair by remember { mutableStateOf<Pair<ProductEntity, CalculationResult>?>(null) }
-
-            val list = products.map { p ->
-                val res = ProfitEngine.calculate(
-                    p.sellingPrice, p.unitsSold, p.cogs, p.packaging,
-                    p.marketplaceFeePercent, p.marketplaceFixedFee, p.voucher,
-                    p.affiliatePercent, p.adsPerOrder, p.otherCostPerOrder, settings.defaultTargetMargin
-                )
-                Pair(p, res)
-            }
-
-            val filtered = list.filter {
-                when (filter) {
-                    "SEHAT" -> it.second.status == ProfitStatus.SEHAT
-                    "TIPIS" -> it.second.status == ProfitStatus.TIPIS
-                    "BONCOS" -> it.second.status == ProfitStatus.BONCOS
-                    else -> true
-                }
-            }
-
-            Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                Text("Daftar Produk (${filtered.size})", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                Spacer(Modifier.height(8.dp))
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf("SEMUA", "SEHAT", "TIPIS", "BONCOS").forEach { f ->
-                        FilterChip(selected = filter == f, onClick = { filter = f }, label = { Text(f, fontSize = 11.sp) })
-                    }
-                }
-
-                LazyColumn(modifier = Modifier.fillMaxSize().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(filtered, key = { it.first.id }) { (prod, res) ->
-                        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), border = CardDefaults.outlinedCardBorder()) {
-                            Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(prod.name, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    val badgeColor = when (res.status) {
-                                        ProfitStatus.SEHAT -> Color(0xFF166534)
-                                        ProfitStatus.TIPIS -> Color(0xFFB45309)
-                                        ProfitStatus.BONCOS -> Color(0xFF991B1B)
-                                    }
-                                    Badge(containerColor = badgeColor) {
-                                        Text(res.status.name, color = Color.White, modifier = Modifier.padding(3.dp), fontSize = 10.sp)
-                                    }
-                                }
-                                Text("Harga: ${formatRupiah(prod.sellingPrice)} | Margin: ${res.marginPercent}%", fontSize = 13.sp)
-                                Text("Net Profit: ${formatRupiah(res.netProfitPerOrder)}", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                    TextButton(onClick = { detailPair = Pair(prod, res) }) { Text("Detail") }
-                                    TextButton(onClick = { onEdit(prod) }) { Text("Edit") }
-                                    IconButton(onClick = { onDelete(prod.id) }) {
-                                        Icon(Icons.Default.Delete, contentDescription = null, tint = Color.Red)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            detailPair?.let { (p, r) ->
-                AlertDialog(
-                    onDismissRequest = { detailPair = null },
-                    title = { Text(p.name) },
-                    text = {
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Harga: ${formatRupiah(p.sellingPrice)}")
-                            Text("HPP: ${formatRupiah(p.cogs)}")
-                            Text("Fee Marketplace: ${p.marketplaceFeePercent}% (${formatRupiah(r.marketplaceFeeNominal)})")
-                            Text("Fixed Fee: ${formatRupiah(p.marketplaceFixedFee)}")
-                            Text("Affiliate: ${p.affiliatePercent}% (${formatRupiah(r.affiliateNominal)})")
-                            Text("Iklan / Order: ${formatRupiah(p.adsPerOrder)}")
-                            HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                            Text("Total Biaya: ${formatRupiah(r.totalCostPerOrder)}", fontWeight = FontWeight.Bold)
-                            Text("Net Profit / Order: ${formatRupiah(r.netProfitPerOrder)}", fontWeight = FontWeight.Bold)
-                            r.bepRoas?.let { Text("BEP ROAS: ${it}x") }
-                        }
-                    },
-                    confirmButton = { TextButton(onClick = { detailPair = null }) { Text("Tutup") } }
-                )
-            }
-        }
-
-        @Composable
-        fun SettingsScreen(repository: ProfitRepository, settings: AppSettings, onUpdated: () -> Unit) {
-            val context = LocalContext.current
-            var marginInput by remember { mutableStateOf(settings.defaultTargetMargin.toPlainString()) }
-            var backupJson by remember { mutableStateOf<String?>(null) }
-            var showRestore by remember { mutableStateOf(false) }
-            var restoreText by remember { mutableStateOf("") }
-
-            Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("Pengaturan", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Target Margin Default (%)", fontWeight = FontWeight.SemiBold)
-                        OutlinedTextField(value = marginInput, onValueChange = { marginInput = it }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
-                        Button(onClick = {
-                            val m = marginInput.replace(",", ".").toBigDecimalOrNull() ?: BigDecimal("20.0")
-                            repository.saveSettings(settings.copy(defaultTargetMargin = m))
-                            Toast.makeText(context, "Target margin tersimpan", Toast.LENGTH_SHORT).show()
-                            onUpdated()
-                        }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
-                            Text("Simpan Target")
-                        }
-                    }
-                }
-
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("Backup & Restore (Offline)", fontWeight = FontWeight.SemiBold)
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            Button(onClick = { backupJson = repository.createBackupJson() }, modifier = Modifier.weight(1f)) {
-                                Text("Backup Data")
-                            }
-                            OutlinedButton(onClick = { showRestore = true }, modifier = Modifier.weight(1f)) {
-                                Text("Restore Data")
-                            }
-                        }
-                    }
-                }
-
-                Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9))) {
-                    Column(modifier = Modifier.padding(14.dp)) {
-                        Text("Profit Control V1.0.0", fontWeight = FontWeight.Bold)
-                        Text("Semua data tersimpan otomatis di memori internal HP Anda. Data tidak akan hilang saat aplikasi ditutup.", fontSize = 12.sp, color = Color.Gray)
-                    }
-                }
-            }
-
-            backupJson?.let { json ->
-                AlertDialog(
-                    onDismissRequest = { backupJson = null },
-                    title = { Text("Backup Selesai") },
-                    text = {
-                        OutlinedTextField(value = json, onValueChange = {}, readOnly = true, modifier = Modifier.height(180.dp))
-                    },
-                    confirmButton = { TextButton(onClick = { backupJson = null }) { Text("Salin & Tutup") } }
-                )
-            }
-
-            if (showRestore) {
-                AlertDialog(
-                    onDismissRequest = { showRestore = false },
-                    title = { Text("Restore Data") },
-                    text = {
-                        OutlinedTextField(value = restoreText, onValueChange = { restoreText = it }, label = { Text("Tempel JSON Backup") }, modifier = Modifier.height(150.dp))
-                    },
-                    confirmButton = {
-                        Button(onClick = {
-                            if (repository.restoreFromJson(restoreText)) {
-                                Toast.makeText(context, "Data berhasil dipulihkan!", Toast.LENGTH_SHORT).show()
-                                onUpdated()
-                                showRestore = false
-                            } else {
-                                Toast.makeText(context, "JSON tidak valid!", Toast.LENGTH_SHORT).show()
-                            }
-                        }, colors = ButtonDefaults.buttonColors(containerColor = Color.Red)) {
-                            Text("Restore Sekarang")
-                        }
-                    },
-                    dismissButton = { TextButton(onClick = { showRestore = false }) { Text("Batal") } }
-                )
-            }
-        }
-        EOF
-
-        # 7. Generate Wrapper
-        gradle wrapper --gradle-version 8.4
-        chmod +x gradlew
-
-    - name: Build Debug APK with Gradle
-      run: ./gradlew assembleDebug --no-daemon
-
-    - name: Upload APK to Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ProfitControl-V1-Complete
-        path: app/build/outputs/apk/debug/app-debug.apk
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Accept Android SDK Licenses Non-Interactively
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
+      - name: Scaffold Android Project, Source Code & Automated Tests
+        run: |
+          mkdir -p app/src/main/java/com/profitcontrol/app
+          mkdir -p app/src/test/java/com/profitcontrol/app
+          mkdir -p app/src/main/res/values
+
+          # 1. settings.gradle.kts
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "ProfitControl"
+          include(":app")
+          EOF
+
+          # 2. Root build.gradle.kts
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.2.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+          }
+          EOF
+
+          # 3. app/build.gradle.kts
+          cat << 'EOF' > app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.profitcontrol.app"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.profitcontrol.app"
+                  minSdk = 24
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "1.0"
+                  testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+                  }
+              }
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+              buildFeatures {
+                  compose = true
+              }
+              composeOptions {
+                  kotlinCompilerExtensionVersion = "1.5.8"
+              }
+          }
+
+          dependencies {
+              implementation(platform("androidx.compose:compose-bom:2024.02.00"))
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.compose.ui:ui-tooling-preview")
+              implementation("androidx.activity:activity-compose:1.8.2")
+              implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+              implementation("com.google.code.gson:gson:2.10.1")
+
+              testImplementation("junit:junit:4.13.2")
+          }
+          EOF
+
+          # 4. AndroidManifest.xml
+          cat << 'EOF' > app/src/main/AndroidManifest.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <application
+                  android:allowBackup="true"
+                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:label="Profit Control"
+                  android:roundIcon="@android:drawable/sym_def_app_icon"
+                  android:supportsRtl="true"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          EOF
+
+          # 5. Core Engine
+          cat << 'EOF' > app/src/main/java/com/profitcontrol/app/ProfitEngine.kt
+          package com.profitcontrol.app
+
+          import java.math.BigDecimal
+          import java.math.RoundingMode
+
+          data class ProductInput(
+              val id: String = java.util.UUID.randomUUID().toString(),
+              val name: String,
+              val sellingPrice: BigDecimal,
+              val cogs: BigDecimal,
+              val marketplaceFeePercent: BigDecimal,
+              val fixedFee: BigDecimal,
+              val packagingCost: BigDecimal,
+              val operationalCost: BigDecimal,
+              val returnReservePercent: BigDecimal,
+              val targetAdsBudget: BigDecimal,
+              val targetAffiliateCommission: BigDecimal
+          )
+
+          data class CalculationResult(
+              val totalFeeNominal: BigDecimal,
+              val netRevenue: BigDecimal,
+              val profitBeforeAds: BigDecimal,
+              val netProfit: BigDecimal,
+              val netProfitMarginPercent: BigDecimal,
+              val bepRoas: BigDecimal,
+              val maxSafeAdsBudget: BigDecimal,
+              val maxSafeAffiliateNominal: BigDecimal,
+              val status: String
+          )
+
+          object ProfitEngine {
+              private val HUNDRED = BigDecimal("100")
+              private val ZERO = BigDecimal.ZERO
+
+              fun calculate(input: ProductInput): CalculationResult {
+                  val price = input.sellingPrice
+                  
+                  val feeMarketplace = price.multiply(input.marketplaceFeePercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
+                  val returnReserve = price.multiply(input.returnReservePercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
+                  val totalDeductions = feeMarketplace.add(input.fixedFee).add(returnReserve)
+                  
+                  val netRevenue = price.subtract(totalDeductions)
+                  val totalBaseCost = input.cogs.add(input.packagingCost).add(input.operationalCost)
+                  
+                  val profitBeforeAds = netRevenue.subtract(totalBaseCost)
+                  val netProfit = profitBeforeAds.subtract(input.targetAdsBudget).subtract(input.targetAffiliateCommission)
+                  
+                  val netMargin = if (price.compareTo(ZERO) > 0) {
+                      netProfit.multiply(HUNDRED).divide(price, 2, RoundingMode.HALF_UP)
+                  } else ZERO
+
+                  val bepRoas = if (profitBeforeAds.compareTo(ZERO) > 0) {
+                      price.divide(profitBeforeAds, 2, RoundingMode.HALF_UP)
+                  } else ZERO
+
+                  val maxAds = if (profitBeforeAds.compareTo(ZERO) > 0) profitBeforeAds.subtract(input.targetAffiliateCommission) else ZERO
+                  val maxAffiliate = if (profitBeforeAds.compareTo(ZERO) > 0) profitBeforeAds.subtract(input.targetAdsBudget) else ZERO
+
+                  val status = when {
+                      netProfit.compareTo(ZERO) < 0 -> "BONCOS"
+                      netMargin.compareTo(BigDecimal("15")) >= 0 -> "SEHAT"
+                      else -> "TIPIS"
+                  }
+
+                  return CalculationResult(
+                      totalFeeNominal = totalDeductions,
+                      netRevenue = netRevenue,
+                      profitBeforeAds = profitBeforeAds,
+                      netProfit = netProfit,
+                      netProfitMarginPercent = netMargin,
+                      bepRoas = bepRoas,
+                      maxSafeAdsBudget = if (maxAds.compareTo(ZERO) > 0) maxAds else ZERO,
+                      maxSafeAffiliateNominal = if (maxAffiliate.compareTo(ZERO) > 0) maxAffiliate else ZERO,
+                      status = status
+                  )
+              }
+          }
+          EOF
+
+          # 6. Repository
+          cat << 'EOF' > app/src/main/java/com/profitcontrol/app/ProfitRepository.kt
+          package com.profitcontrol.app
+
+          import android.content.Context
+          import com.google.gson.Gson
+          import com.google.gson.reflect.TypeToken
+          import java.io.File
+          import java.io.FileOutputStream
+
+          class ProfitRepository(private val context: Context) {
+              private val fileName = "profit_products_v1.json"
+              private val gson = Gson()
+
+              @Synchronized
+              fun saveProducts(products: List<ProductInput>): Boolean {
+                  return try {
+                      val file = File(context.filesDir, fileName)
+                      val tempFile = File(context.filesDir, "$fileName.tmp")
+                      val jsonString = gson.toJson(products)
+
+                      FileOutputStream(tempFile).use { fos ->
+                          fos.write(jsonString.toByteArray(Charsets.UTF_8))
+                          fos.flush()
+                      }
+                      tempFile.renameTo(file)
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                      false
+                  }
+              }
+
+              @Synchronized
+              fun loadProducts(): List<ProductInput> {
+                  return try {
+                      val file = File(context.filesDir, fileName)
+                      if (!file.exists()) return emptyList()
+                      val jsonString = file.readText(Charsets.UTF_8)
+                      val type = object : TypeToken<List<ProductInput>>() {}.type
+                      gson.fromJson(jsonString, type) ?: emptyList()
+                  } catch (e: Exception) {
+                      e.printStackTrace()
+                      emptyList()
+                  }
+              }
+
+              fun exportJson(): String {
+                  val list = loadProducts()
+                  return gson.toJson(list)
+              }
+
+              fun importJson(json: String): Boolean {
+                  return try {
+                      val type = object : TypeToken<List<ProductInput>>() {}.type
+                      val list: List<ProductInput> = gson.fromJson(json, type)
+                      saveProducts(list)
+                  } catch (e: Exception) {
+                      false
+                  }
+              }
+          }
+          EOF
+
+          # 7. UI Jetpack Compose
+          cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
+          package com.profitcontrol.app
+
+          import android.os.Bundle
+          import androidx.activity.ComponentActivity
+          import androidx.activity.compose.setContent
+          import androidx.compose.foundation.layout.*
+          import androidx.compose.foundation.lazy.LazyColumn
+          import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.text.KeyboardOptions
+          import androidx.compose.material3.*
+          import androidx.compose.runtime.*
+          import androidx.compose.ui.Alignment
+          import androidx.compose.ui.Modifier
+          import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.text.font.FontWeight
+          import androidx.compose.ui.text.input.KeyboardType
+          import androidx.compose.ui.unit.dp
+          import androidx.compose.ui.unit.sp
+          import java.math.BigDecimal
+
+          class MainActivity : ComponentActivity() {
+              private lateinit var repo: ProfitRepository
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  repo = ProfitRepository(applicationContext)
+
+                  setContent {
+                      MaterialTheme {
+                          Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                              MainAppScreen(repo)
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun MainAppScreen(repo: ProfitRepository) {
+              var selectedTab by remember { mutableIntStateOf(0) }
+              var productList by remember { mutableStateOf(repo.loadProducts()) }
+
+              Column(modifier = Modifier.fillMaxSize()) {
+                  TabRow(selectedTabIndex = selectedTab) {
+                      Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Hitung") })
+                      Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("List (${productList.size})") })
+                      Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Backup") })
+                  }
+
+                  when (selectedTab) {
+                      0 -> ProfitCalculatorScreen(onSave = { newProd ->
+                          val updated = productList.filter { it.id != newProd.id } + newProd
+                          if (repo.saveProducts(updated)) {
+                              productList = updated
+                          }
+                      })
+                      1 -> ProductListScreen(
+                          products = productList,
+                          onDelete = { prod ->
+                              val updated = productList.filter { it.id != prod.id }
+                              if (repo.saveProducts(updated)) {
+                                  productList = updated
+                              }
+                          }
+                      )
+                      2 -> BackupRestoreScreen(repo, onReload = {
+                          productList = repo.loadProducts()
+                      })
+                  }
+              }
+          }
+
+          @Composable
+          fun ProfitCalculatorScreen(onSave: (ProductInput) -> Unit) {
+              var name by remember { mutableStateOf("") }
+              var price by remember { mutableStateOf("") }
+              var cogs by remember { mutableStateOf("") }
+              var feePct by remember { mutableStateOf("6.5") }
+              var fixedFee by remember { mutableStateOf("1000") }
+              var packCost by remember { mutableStateOf("2000") }
+              var opCost by remember { mutableStateOf("1500") }
+              var returnPct by remember { mutableStateOf("2") }
+              var adsBudget by remember { mutableStateOf("5000") }
+              var affComm by remember { mutableStateOf("0") }
+
+              val calcResult by remember(name, price, cogs, feePct, fixedFee, packCost, opCost, returnPct, adsBudget, affComm) {
+                  derivedStateOf {
+                      val p = price.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                      val c = cogs.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                      if (p > BigDecimal.ZERO && c > BigDecimal.ZERO) {
+                          val input = ProductInput(
+                              name = name.ifEmpty { "Produk" },
+                              sellingPrice = p,
+                              cogs = c,
+                              marketplaceFeePercent = feePct.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                              fixedFee = fixedFee.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                              packagingCost = packCost.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                              operationalCost = opCost.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                              returnReservePercent = returnPct.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                              targetAdsBudget = adsBudget.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                              targetAffiliateCommission = affComm.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                          )
+                          ProfitEngine.calculate(input)
+                      } else null
+                  }
+              }
+
+              LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                  item {
+                      Text("Kalkulator Profit Riil V1", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+                      Spacer(modifier = Modifier.height(4.dp))
+                  }
+                  item { OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("Nama Produk") }, modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Harga Jual (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = cogs, onValueChange = { cogs = it }, label = { Text("HPP / Modal Produk (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = feePct, onValueChange = { feePct = it }, label = { Text("Biaya Admin Marketplace (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = fixedFee, onValueChange = { fixedFee = it }, label = { Text("Biaya Transaksi Tetap (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = packCost, onValueChange = { packCost = it }, label = { Text("Biaya Packing (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = opCost, onValueChange = { opCost = it }, label = { Text("Biaya Operasional (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = returnPct, onValueChange = { returnPct = it }, label = { Text("Cadangan Retur (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = adsBudget, onValueChange = { adsBudget = it }, label = { Text("Alokasi Iklan per Order (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+                  item { OutlinedTextField(value = affComm, onValueChange = { affComm = it }, label = { Text("Komisi Affiliate (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.fillMaxWidth()) }
+
+                  calcResult?.let { res ->
+                      item {
+                          Card(
+                              modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                              colors = CardDefaults.cardColors(
+                                  containerColor = when (res.status) {
+                                      "SEHAT" -> Color(0xFFE8F5E9)
+                                      "TIPIS" -> Color(0xFFFFF9C4)
+                                      else -> Color(0xFFFFEBEE)
+                                  }
+                              )
+                          ) {
+                              Column(modifier = Modifier.padding(16.dp)) {
+                                  Text("STATUS: ${res.status}", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = when (res.status) {
+                                      "SEHAT" -> Color(0xFF2E7D32)
+                                      "TIPIS" -> Color(0xFFF57F17)
+                                      else -> Color(0xFFC62828)
+                                  })
+                                  Text("Profit Bersih: Rp ${res.netProfit} (${res.netProfitMarginPercent}%)")
+                                  Text("Profit Sebelum Iklan: Rp ${res.profitBeforeAds}")
+                                  Text("BEP ROAS Minimal: ${res.bepRoas}x")
+                                  Text("Batas Aman Biaya Iklan: Rp ${res.maxSafeAdsBudget}")
+                                  Text("Batas Aman Komisi Affiliate: Rp ${res.maxSafeAffiliateNominal}")
+                              }
+                          }
+                      }
+                      item {
+                          Button(
+                              onClick = {
+                                  val input = ProductInput(
+                                      name = name.ifEmpty { "Produk Baru" },
+                                      sellingPrice = price.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                                      cogs = cogs.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                                      marketplaceFeePercent = feePct.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                                      fixedFee = fixedFee.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                                      packagingCost = packCost.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                                      operationalCost = opCost.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                                      returnReservePercent = returnPct.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                                      targetAdsBudget = adsBudget.toBigDecimalOrNull() ?: BigDecimal.ZERO,
+                                      targetAffiliateCommission = affComm.toBigDecimalOrNull() ?: BigDecimal.ZERO
+                                  )
+                                  onSave(input)
+                              },
+                              modifier = Modifier.fillMaxWidth()
+                          ) {
+                              Text("Simpan ke Data Lokal (Anti-Hilang)")
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun ProductListScreen(products: List<ProductInput>, onDelete: (ProductInput) -> Unit) {
+              if (products.isEmpty()) {
+                  Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                      Text("Belum ada data tersimpan.")
+                  }
+              } else {
+                  LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                      items(products) { prod ->
+                          val res = ProfitEngine.calculate(prod)
+                          Card(modifier = Modifier.fillMaxWidth()) {
+                              Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                  Column(modifier = Modifier.weight(1f)) {
+                                      Text(prod.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                      Text("Jual: Rp ${prod.sellingPrice} | HPP: Rp ${prod.cogs}")
+                                      Text("Net Profit: Rp ${res.netProfit} (${res.status})", color = if (res.status == "BONCOS") Color.Red else Color(0xFF2E7D32))
+                                  }
+                                  IconButton(onClick = { onDelete(prod) }) {
+                                      Text("Hapus", color = Color.Red, fontSize = 12.sp)
+                                  }
+                              }
+                          }
+                      }
+                  }
+              }
+          }
+
+          @Composable
+          fun BackupRestoreScreen(repo: ProfitRepository, onReload: () -> Unit) {
+              var jsonText by remember { mutableStateOf(repo.exportJson()) }
+              var message by remember { mutableStateOf("") }
+
+              Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                  Text("Backup & Restore Data Lokal (JSON)", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                  OutlinedTextField(
+                      value = jsonText,
+                      onValueChange = { jsonText = it },
+                      label = { Text("Format Teks Data JSON") },
+                      modifier = Modifier.fillMaxWidth().height(200.dp)
+                  )
+                  Button(onClick = {
+                      if (repo.importJson(jsonText)) {
+                          message = "Data berhasil di-restore!"
+                          onReload()
+                      } else {
+                          message = "Gagal memproses format JSON."
+                      }
+                  }, modifier = Modifier.fillMaxWidth()) {
+                      Text("Restore / Terapkan Data JSON")
+                  }
+                  if (message.isNotEmpty()) {
+                      Text(message, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                  }
+              }
+          }
+          EOF
+
+          # 8. Automated Unit Test File (Mengeksekusi Tahap 2 secara Headless)
+          cat << 'EOF' > app/src/test/java/com/profitcontrol/app/ProfitEngineTest.kt
+          package com.profitcontrol.app
+
+          import org.junit.Assert.assertEquals
+          import org.junit.Test
+          import java.math.BigDecimal
+
+          class ProfitEngineTest {
+
+              @Test
+              fun testScenarioA_HealthyMargin() {
+                  val input = ProductInput(
+                      name = "Produk A",
+                      sellingPrice = BigDecimal("100000"),
+                      cogs = BigDecimal("40000"),
+                      marketplaceFeePercent = BigDecimal("6.5"),
+                      fixedFee = BigDecimal("1000"),
+                      packagingCost = BigDecimal("2000"),
+                      operationalCost = BigDecimal("2000"),
+                      returnReservePercent = BigDecimal("2.0"),
+                      targetAdsBudget = BigDecimal("5000"),
+                      targetAffiliateCommission = BigDecimal("0")
+                  )
+
+                  val result = ProfitEngine.calculate(input)
+
+                  assertEquals("SEHAT", result.status)
+                  assertEquals(BigDecimal("46500.00"), result.profitBeforeAds)
+                  assertEquals(BigDecimal("41500.00"), result.netProfit)
+                  assertEquals(BigDecimal("41.50"), result.netProfitMarginPercent)
+                  assertEquals(BigDecimal("2.15"), result.bepRoas)
+                  assertEquals(BigDecimal("46500.00"), result.maxSafeAdsBudget)
+              }
+
+              @Test
+              fun testScenarioB_LossOverAds() {
+                  val input = ProductInput(
+                      name = "Produk B",
+                      sellingPrice = BigDecimal("50000"),
+                      cogs = BigDecimal("35000"),
+                      marketplaceFeePercent = BigDecimal("6.5"),
+                      fixedFee = BigDecimal("1000"),
+                      packagingCost = BigDecimal("2000"),
+                      operationalCost = BigDecimal("1000"),
+                      returnReservePercent = BigDecimal("2.0"),
+                      targetAdsBudget = BigDecimal("10000"),
+                      targetAffiliateCommission = BigDecimal("0")
+                  )
+
+                  val result = ProfitEngine.calculate(input)
+
+                  assertEquals("BONCOS", result.status)
+                  assertEquals(BigDecimal("6750.00"), result.profitBeforeAds)
+                  assertEquals(BigDecimal("-3250.00"), result.netProfit)
+                  assertEquals(BigDecimal("-6.50"), result.netProfitMarginPercent)
+                  assertEquals(BigDecimal("7.41"), result.bepRoas)
+                  assertEquals(BigDecimal("6750.00"), result.maxSafeAdsBudget)
+              }
+
+              @Test
+              fun testEdgeCase_ZeroDivisionProtection() {
+                  val input = ProductInput(
+                      name = "Produk Rugi Ekstrem",
+                      sellingPrice = BigDecimal("20000"),
+                      cogs = BigDecimal("30000"),
+                      marketplaceFeePercent = BigDecimal("6.5"),
+                      fixedFee = BigDecimal("1000"),
+                      packagingCost = BigDecimal("2000"),
+                      operationalCost = BigDecimal("1000"),
+                      returnReservePercent = BigDecimal("2.0"),
+                      targetAdsBudget = BigDecimal("0"),
+                      targetAffiliateCommission = BigDecimal("0")
+                  )
+
+                  val result = ProfitEngine.calculate(input)
+
+                  assertEquals("BONCOS", result.status)
+                  assertEquals(BigDecimal.ZERO, result.bepRoas)
+                  assertEquals(BigDecimal.ZERO, result.maxSafeAdsBudget)
+              }
+          }
+          EOF
+
+      - name: Generate Gradle Wrapper & Run Automated Unit Tests
+        run: |
+          sudo apt-get update && sudo apt-get install -y gradle
+          gradle wrapper --gradle-version 8.4
+          chmod +x gradlew
+          echo "=== RUNNING AUTOMATED UNIT TESTS ==="
+          ./gradlew testDebugUnitTest --no-daemon --info
+          echo "=== ALL UNIT TESTS PASSED ==="
+
+      - name: Compile Debug APK
+        run: |
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload Verified APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProfitControl-V1-Verified
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
