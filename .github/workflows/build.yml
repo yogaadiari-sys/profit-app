@@ -21,7 +21,11 @@ jobs:
 
     - name: Inject Full Profit Control V1 Implementation
       run: |
-        # 1. Update app/build.gradle.kts to include Gson
+        # Buat seluruh direktori yang dibutuhkan agar tidak ada error No such file or directory
+        mkdir -p app/src/main/java/com/profitcontrol/app
+        mkdir -p app/src/test/java/com/profitcontrol/app
+
+        # 1. Update app/build.gradle.kts
         cat << 'EOF' > app/build.gradle.kts
         plugins {
             alias(libs.plugins.android.application)
@@ -86,7 +90,7 @@ jobs:
         }
         EOF
 
-        # 2. Update MainActivity.kt with complete V1 logic, BigDecimal, Persistence & UI
+        # 2. Update MainActivity.kt
         cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
         package com.profitcontrol.app
 
@@ -912,7 +916,7 @@ jobs:
         }
         EOF
 
-        # 3. Update Unit Test to avoid compile error
+        # 3. Update Unit Test
         cat << 'EOF' > app/src/test/java/com/profitcontrol/app/ProfitCalculatorTest.kt
         package com.profitcontrol.app
 
