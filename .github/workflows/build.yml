@@ -19,16 +19,21 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Accept Android SDK Licenses Non-Interactively
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: '8.4'
+
+      - name: Accept Android SDK Licenses
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
 
-      - name: Scaffold Complete Android Project & Source Code
+      - name: Scaffold Project Files
         run: |
           mkdir -p app/src/main/java/com/profitcontrol/app
           mkdir -p app/src/main/res/values
 
-          # 1. Root settings.gradle.kts
+          # settings.gradle.kts
           cat << 'EOF' > settings.gradle.kts
           pluginManagement {
               repositories {
@@ -48,7 +53,7 @@ jobs:
           include(":app")
           EOF
 
-          # 2. Root build.gradle.kts
+          # build.gradle.kts (root)
           cat << 'EOF' > build.gradle.kts
           plugins {
               id("com.android.application") version "8.2.2" apply false
@@ -56,7 +61,7 @@ jobs:
           }
           EOF
 
-          # 3. app/build.gradle.kts
+          # app/build.gradle.kts
           cat << 'EOF' > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -107,7 +112,7 @@ jobs:
           }
           EOF
 
-          # 4. AndroidManifest.xml
+          # AndroidManifest.xml
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -131,7 +136,7 @@ jobs:
           </manifest>
           EOF
 
-          # 5. Core Engine
+          # ProfitEngine.kt (Audit Terverifikasi)
           cat << 'EOF' > app/src/main/java/com/profitcontrol/app/ProfitEngine.kt
           package com.profitcontrol.app
 
@@ -213,7 +218,7 @@ jobs:
           }
           EOF
 
-          # 6. Repository
+          # ProfitRepository.kt
           cat << 'EOF' > app/src/main/java/com/profitcontrol/app/ProfitRepository.kt
           package com.profitcontrol.app
 
@@ -276,7 +281,7 @@ jobs:
           }
           EOF
 
-          # 7. UI Jetpack Compose (Basis Sukses Teruji)
+          # MainActivity.kt (Versi Stabil yang Sukses Terpasang di HP Anda)
           cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
           package com.profitcontrol.app
 
@@ -324,9 +329,9 @@ jobs:
 
               Column(modifier = Modifier.fillMaxSize()) {
                   TabRow(selectedTabIndex = selectedTab) {
-                      Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Hitung", fontSize = 12.sp) })
-                      Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("List (${productList.size})", fontSize = 12.sp) })
-                      Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Backup", fontSize = 12.sp) })
+                      Tab(selected = selectedTab == 0, onClick = { selectedTab = 0 }, text = { Text("Hitung") })
+                      Tab(selected = selectedTab == 1, onClick = { selectedTab = 1 }, text = { Text("List (${productList.size})") })
+                      Tab(selected = selectedTab == 2, onClick = { selectedTab = 2 }, text = { Text("Backup") })
                   }
 
                   when (selectedTab) {
@@ -446,7 +451,7 @@ jobs:
                                       targetAffiliateCommission = affComm.toBigDecimalOrNull() ?: BigDecimal.ZERO
                                   )
                                   onSave(input)
-                                  Toast.makeText(context, "Produk tersimpan!", Toast.LENGTH_SHORT).show()
+                                  Toast.makeText(context, "Data tersimpan!", Toast.LENGTH_SHORT).show()
                               },
                               modifier = Modifier.fillMaxWidth()
                           ) {
@@ -454,8 +459,7 @@ jobs:
                           }
                       }
                   }
-                  // Spacer bawah agar nyaman di-scroll
-                  item { Spacer(modifier = Modifier.height(40.dp)) }
+                  item { Spacer(modifier = Modifier.height(30.dp)) }
               }
           }
 
@@ -482,7 +486,6 @@ jobs:
                               }
                           }
                       }
-                      item { Spacer(modifier = Modifier.height(40.dp)) }
                   }
               }
           }
@@ -519,16 +522,13 @@ jobs:
           }
           EOF
 
-      - name: Generate Gradle Wrapper & Build APK
+      - name: Build Debug APK
         run: |
-          sudo apt-get update && sudo apt-get install -y gradle
-          gradle wrapper --gradle-version 8.4
-          chmod +x gradlew
-          ./gradlew assembleDebug --no-daemon
+          gradle assembleDebug --no-daemon
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ProfitControl-V1-Stable
+          name: ProfitControl-V1-Audit
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
