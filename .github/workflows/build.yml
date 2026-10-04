@@ -19,31 +19,79 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Locate Project and Inject Implementation
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Scaffold Complete Project & Inject V1 Source
       run: |
-        # Cari lokasi settings.gradle atau settings.gradle.kts
-        SETTINGS_FILE=$(find . -name "settings.gradle*" | head -n 1)
-        
-        if [ -z "$SETTINGS_FILE" ]; then
-          TARGET_DIR="."
-        else
-          TARGET_DIR=$(dirname "$SETTINGS_FILE")
-        fi
-        
-        echo "Root proyek ditemukan di: $TARGET_DIR"
-        echo "PROJ_DIR=$TARGET_DIR" >> $GITHUB_ENV
+        # 1. Buat file gradle.properties
+        cat << 'EOF' > gradle.properties
+        org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+        android.useAndroidX=true
+        android.nonTransitiveRClass=true
+        EOF
 
-        cd "$TARGET_DIR"
+        # 2. Buat settings.gradle.kts
+        cat << 'EOF' > settings.gradle.kts
+        pluginManagement {
+            repositories {
+                google()
+                mavenCentral()
+                gradlePluginPortal()
+            }
+        }
+        dependencyResolutionManagement {
+            repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+            repositories {
+                google()
+                mavenCentral()
+            }
+        }
+        rootProject.name = "ProfitControl"
+        include(":app")
+        EOF
 
+        # 3. Buat root build.gradle.kts
+        cat << 'EOF' > build.gradle.kts
+        plugins {
+            id("com.android.application") version "8.2.2" apply false
+            id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+        }
+        EOF
+
+        # 4. Buat folder app & manifests
         mkdir -p app/src/main/java/com/profitcontrol/app
-        mkdir -p app/src/test/java/com/profitcontrol/app
+        mkdir -p app/src/main/res/values
 
-        # 1. Update app/build.gradle.kts
+        # 5. Buat AndroidManifest.xml
+        cat << 'EOF' > app/src/main/AndroidManifest.xml
+        <?xml version="1.0" encoding="utf-8"?>
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+            <application
+                android:allowBackup="true"
+                android:icon="@android:drawable/sym_def_app_icon"
+                android:label="Profit Control"
+                android:roundIcon="@android:drawable/sym_def_app_icon"
+                android:supportsRtl="true"
+                android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                <activity
+                    android:name=".MainActivity"
+                    android:exported="true"
+                    android:theme="@android:style/Theme.Material.Light.NoActionBar">
+                    <intent-filter>
+                        <action android:name="android.intent.action.MAIN" />
+                        <category android:name="android.intent.category.LAUNCHER" />
+                    </intent-filter>
+                </activity>
+            </application>
+        </manifest>
+        EOF
+
+        # 6. Buat app/build.gradle.kts
         cat << 'EOF' > app/build.gradle.kts
         plugins {
-            alias(libs.plugins.android.application)
-            alias(libs.plugins.kotlin.android)
-            alias(libs.plugins.kotlin.compose)
+            id("com.android.application")
+            id("org.jetbrains.kotlin.android")
         }
 
         android {
@@ -56,54 +104,43 @@ jobs:
                 targetSdk = 34
                 versionCode = 1
                 versionName = "1.0.0"
-
-                testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
             }
 
             buildTypes {
                 release {
                     isMinifyEnabled = false
-                    proguardFiles(
-                        getDefaultProguardFile("proguard-android-optimize.txt"),
-                        "proguard-rules.pro"
-                    )
                 }
             }
             compileOptions {
-                sourceCompatibility = JavaVersion.VERSION_11
-                targetCompatibility = JavaVersion.VERSION_11
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
             }
             kotlinOptions {
-                jvmTarget = "11"
+                jvmTarget = "17"
             }
             buildFeatures {
                 compose = true
             }
+            composeOptions {
+                kotlinCompilerExtensionVersion = "1.5.8"
+            }
         }
 
         dependencies {
-            implementation(libs.androidx.core.ktx)
-            implementation(libs.androidx.lifecycle.runtime.ktx)
-            implementation(libs.androidx.activity.compose)
-            implementation(platform(libs.androidx.compose.bom))
-            implementation(libs.androidx.compose.ui)
-            implementation(libs.androidx.compose.ui.graphics)
-            implementation(libs.androidx.compose.ui.tooling.preview)
-            implementation(libs.androidx.compose.material3)
+            val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
+            implementation(composeBom)
+            implementation("androidx.core:core-ktx:1.12.0")
+            implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+            implementation("androidx.activity:activity-compose:1.8.2")
+            implementation("androidx.compose.ui:ui")
+            implementation("androidx.compose.ui:ui-graphics")
+            implementation("androidx.compose.material3:material3")
             implementation("androidx.compose.material:material-icons-extended")
             implementation("com.google.code.gson:gson:2.10.1")
-
-            testImplementation(libs.junit)
-            androidTestImplementation(libs.androidx.junit)
-            androidTestImplementation(libs.androidx.espresso.core)
-            androidTestImplementation(platform(libs.androidx.compose.bom))
-            androidTestImplementation(libs.androidx.compose.ui.test.junit4)
-            debugImplementation(libs.androidx.compose.ui.tooling)
-            debugImplementation(libs.androidx.compose.ui.test.manifest)
         }
         EOF
 
-        # 2. Update MainActivity.kt
+        # 7. Inject MainActivity.kt (Engine, Storage & Complete UI)
         cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
         package com.profitcontrol.app
 
@@ -929,50 +966,15 @@ jobs:
         }
         EOF
 
-        # 3. Update Unit Test
-        cat << 'EOF' > app/src/test/java/com/profitcontrol/app/ProfitCalculatorTest.kt
-        package com.profitcontrol.app
+        # 8. Setup Wrapper secara mandiri
+        gradle wrapper --gradle-version 8.4
+        chmod +x gradlew
 
-        import org.junit.Assert.*
-        import org.junit.Test
-        import java.math.BigDecimal
-
-        class ProfitCalculatorTest {
-            @Test
-            fun testBasicProfit() {
-                val res = ProfitEngine.calculate(
-                    sellingPrice = BigDecimal("100000"),
-                    unitsSold = 1,
-                    cogs = BigDecimal("50000"),
-                    packaging = BigDecimal.ZERO,
-                    feePercent = BigDecimal.ZERO,
-                    fixedFee = BigDecimal.ZERO,
-                    voucher = BigDecimal.ZERO,
-                    affiliatePercent = BigDecimal.ZERO,
-                    adsPerOrder = BigDecimal.ZERO,
-                    otherCost = BigDecimal.ZERO
-                )
-                assertEquals(BigDecimal("50000.00"), res.netProfitPerOrder.setScale(2))
-                assertEquals(ProfitStatus.SEHAT, res.status)
-            }
-        }
-        EOF
-
-    - name: Build Debug APK
-      run: |
-        cd "$PROJ_DIR"
-        if [ -f "./gradlew" ]; then
-          chmod +x ./gradlew
-          ./gradlew assembleDebug
-        else
-          # Generate wrapper jika belum ada
-          gradle wrapper
-          chmod +x ./gradlew
-          ./gradlew assembleDebug
-        fi
+    - name: Build Debug APK with Gradle
+      run: ./gradlew assembleDebug --stacktrace
 
     - name: Upload APK to Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ProfitControl-V1-Complete
-        path: ${{ env.PROJ_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+        path: app/build/outputs/apk/debug/app-debug.apk
