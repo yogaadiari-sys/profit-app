@@ -19,11 +19,22 @@ jobs:
         java-version: '17'
         distribution: 'temurin'
 
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v3
-
-    - name: Inject Full Profit Control V1 Implementation
+    - name: Locate Project and Inject Implementation
       run: |
+        # Cari lokasi settings.gradle atau settings.gradle.kts
+        SETTINGS_FILE=$(find . -name "settings.gradle*" | head -n 1)
+        
+        if [ -z "$SETTINGS_FILE" ]; then
+          TARGET_DIR="."
+        else
+          TARGET_DIR=$(dirname "$SETTINGS_FILE")
+        fi
+        
+        echo "Root proyek ditemukan di: $TARGET_DIR"
+        echo "PROJ_DIR=$TARGET_DIR" >> $GITHUB_ENV
+
+        cd "$TARGET_DIR"
+
         mkdir -p app/src/main/java/com/profitcontrol/app
         mkdir -p app/src/test/java/com/profitcontrol/app
 
@@ -949,15 +960,19 @@ jobs:
 
     - name: Build Debug APK
       run: |
+        cd "$PROJ_DIR"
         if [ -f "./gradlew" ]; then
           chmod +x ./gradlew
           ./gradlew assembleDebug
         else
-          gradle assembleDebug
+          # Generate wrapper jika belum ada
+          gradle wrapper
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
         fi
 
     - name: Upload APK to Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: ProfitControl-V1-Complete
-        path: app/build/outputs/apk/debug/app-debug.apk
+        path: ${{ env.PROJ_DIR }}/app/build/outputs/apk/debug/app-debug.apk
