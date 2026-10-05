@@ -130,12 +130,11 @@ jobs:
               implementation("androidx.compose.ui:ui-tooling-preview")
               implementation("androidx.compose.material3:material3")
               implementation("androidx.compose.material:material-icons-core")
-              implementation("androidx.compose.material:material-icons-extended")
               implementation("com.google.code.gson:gson:2.10.1")
           }
           EOF
 
-          # BACKGROUND DRAWABLE VECTOR BERLAPIS HIGHLIGHT
+          # BACKGROUND VECTOR HIJAU EMERALD RESMI
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_background.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -144,20 +143,11 @@ jobs:
               android:viewportHeight="108">
               <path
                   android:pathData="M0,0h108v108h-108z"
-                  android:fillColor="#004D40"/>
-              <path
-                  android:pathData="M0,0 L108,0 L108,70 L0,108 Z"
-                  android:fillColor="#006D5B"/>
-              <path
-                  android:pathData="M0,0 L65,0 C42,24 24,42 0,65 Z"
-                  android:fillColor="#26A69A"/>
-              <path
-                  android:pathData="M0,0 L40,0 C26,14 14,26 0,40 Z"
-                  android:fillColor="#80CBC4"/>
+                  android:fillColor="#005B4C"/>
           </vector>
           EOF
 
-          # FOREGROUND GRAFIK DENGAN AKSEN DEPTH
+          # FOREGROUND GRAFIK FINANSIAL (PUTIH + PANAH MINT)
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_foreground.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -165,19 +155,16 @@ jobs:
               android:viewportWidth="108"
               android:viewportHeight="108">
               <path
-                  android:fillColor="#25002018"
-                  android:pathData="M35,72 L43,72 L43,56 L35,56 Z M49,72 L57,72 L57,46 L49,46 Z M63,72 L71,72 L71,38 L63,38 Z M31,78 L77,78 L77,74 L31,74 Z"/>
-              <path
                   android:fillColor="#FFFFFF"
                   android:pathData="M34,70 L42,70 L42,54 L34,54 Z M48,70 L56,70 L56,44 L48,44 Z M62,70 L70,70 L70,36 L62,36 Z M30,76 L76,76 L76,72 L30,72 Z"/>
               <path
                   android:strokeColor="#A7F3D0"
-                  android:strokeWidth="4"
+                  android:strokeWidth="3.5"
                   android:strokeLineCap="round"
                   android:pathData="M34,48 L48,36 L60,44 L74,30"/>
               <path
                   android:fillColor="#A7F3D0"
-                  android:pathData="M68,30 L76,30 L76,38 Z"/>
+                  android:pathData="M70,30 L76,30 L76,36 Z"/>
           </vector>
           EOF
 
@@ -219,7 +206,7 @@ jobs:
           </resources>
           EOF
 
-      - name: Inject Source Code with In-App Guide, Q&A, and Single Sample Product
+      - name: Inject Source Code
         run: |
           cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
           package com.profitcontrol.app
