@@ -81,8 +81,8 @@ jobs:
                   applicationId = "com.profitcontrol.app"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 5
-                  versionName = "1.0.4"
+                  versionCode = 6
+                  versionName = "1.0.5"
 
                   testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                   vectorDrawables {
@@ -224,8 +224,10 @@ jobs:
           import androidx.compose.foundation.text.KeyboardOptions
           import androidx.compose.foundation.verticalScroll
           import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.Add
           import androidx.compose.material.icons.filled.Home
           import androidx.compose.material.icons.filled.List
+          import androidx.compose.material.icons.filled.PlayArrow
           import androidx.compose.material.icons.filled.Settings
           import androidx.compose.material3.*
           import androidx.compose.runtime.*
@@ -521,8 +523,8 @@ jobs:
                                   icon = {
                                       when (tab) {
                                           NavTab.HOME -> Icon(Icons.Default.Home, contentDescription = "Home")
-                                          NavTab.HITUNG -> Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = if (currentTab == tab) Color(0xFF006D5B) else Color(0xFF757575))
-                                          NavTab.SIMULASI -> Text("S", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = if (currentTab == tab) Color(0xFF006D5B) else Color(0xFF757575))
+                                          NavTab.HITUNG -> Icon(Icons.Default.Add, contentDescription = "Hitung")
+                                          NavTab.SIMULASI -> Icon(Icons.Default.PlayArrow, contentDescription = "Simulasi")
                                           NavTab.PRODUK -> Icon(Icons.Default.List, contentDescription = "Produk")
                                           NavTab.SETTING -> Icon(Icons.Default.Settings, contentDescription = "Setting")
                                       }
@@ -1280,6 +1282,7 @@ jobs:
           ) {
               var selectedFilter by remember { mutableStateOf("SEMUA") }
               var editingProduct by remember { mutableStateOf<ProductItem?>(null) }
+              var productToDelete by remember { mutableStateOf<ProductItem?>(null) }
 
               val calculatedList = remember(products, targetMargin) {
                   products.map { p ->
@@ -1427,7 +1430,7 @@ jobs:
                                               fontSize = 12.sp,
                                               fontWeight = FontWeight.Bold,
                                               modifier = Modifier
-                                                  .clickable { onDeleteProduct(product.id) }
+                                                  .clickable { productToDelete = product }
                                                   .padding(8.dp)
                                           )
                                       }
@@ -1438,6 +1441,32 @@ jobs:
                   }
               }
 
+              // DIALOG KONFIRMASI HAPUS
+              productToDelete?.let { prod ->
+                  AlertDialog(
+                      onDismissRequest = { productToDelete = null },
+                      title = { Text("Konfirmasi Hapus") },
+                      text = { Text("Hapus produk '${prod.name}'? Data yang dihapus tidak bisa dikembalikan.") },
+                      confirmButton = {
+                          Button(
+                              onClick = {
+                                  onDeleteProduct(prod.id)
+                                  productToDelete = null
+                              },
+                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828))
+                          ) {
+                              Text("Hapus")
+                          }
+                      },
+                      dismissButton = {
+                          TextButton(onClick = { productToDelete = null }) {
+                              Text("Batal")
+                          }
+                      }
+                  )
+              }
+
+              // DIALOG EDIT PRODUK
               editingProduct?.let { prod ->
                   var editName by remember { mutableStateOf(prod.name) }
                   var editPrice by remember { mutableStateOf(prod.sellingPrice.toLong().toString()) }
@@ -1721,7 +1750,7 @@ jobs:
                   ) {
                       Column(modifier = Modifier.padding(16.dp)) {
                           Text(
-                              "Profit Control V1.0.4",
+                              "Profit Control V1.0.5",
                               fontWeight = FontWeight.Bold,
                               fontSize = 14.sp,
                               color = Color(0xFF1E293B)
@@ -1806,5 +1835,5 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ProfitControl-V1.0.4-Master
+          name: ProfitControl-V1.0.5-ProductionRelease
           path: app/build/outputs/apk/debug/app-debug.apk
