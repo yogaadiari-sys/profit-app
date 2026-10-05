@@ -19,12 +19,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Accept Android Licenses
         run: |
-          yes | sdkmanager --licenses || true
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -35,7 +32,6 @@ jobs:
         run: |
           mkdir -p app/src/main/java/com/profitcontrol/app
           mkdir -p app/src/main/res/values
-          mkdir -p app/src/main/res/mipmap-hdpi
 
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m
@@ -191,14 +187,12 @@ jobs:
           import androidx.compose.runtime.*
           import androidx.compose.ui.Alignment
           import androidx.compose.ui.Modifier
-          import androidx.compose.ui.draw.clip
           import androidx.compose.ui.graphics.Color
           import androidx.compose.ui.platform.LocalClipboardManager
           import androidx.compose.ui.platform.LocalContext
           import androidx.compose.ui.text.AnnotatedString
           import androidx.compose.ui.text.font.FontWeight
           import androidx.compose.ui.text.input.KeyboardType
-          import androidx.compose.ui.text.style.TextAlign
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
           import com.google.gson.Gson
@@ -210,7 +204,6 @@ jobs:
           import java.util.Locale
           import java.util.UUID
 
-          // DATA MODELS
           data class ProductItem(
               val id: String = UUID.randomUUID().toString(),
               val name: String,
@@ -222,7 +215,7 @@ jobs:
               val operationalCost: Double,
               val returnReservePercent: Double,
               val targetAds: Double,
-              val targetAffiliatePercent: Double // Berubah jadi persen (%)
+              val targetAffiliatePercent: Double
           )
 
           data class CalculationResult(
@@ -235,7 +228,6 @@ jobs:
               val affiliateNominal: BigDecimal
           )
 
-          // ENGINE KEUANGAN BIGDECIMAL
           object ProfitEngine {
               fun calculate(
                   sellingPrice: Double,
@@ -327,7 +319,6 @@ jobs:
               }
           }
 
-          // REPOSITORY PERSISTENSI OFFLINE
           class ProfitRepository(private val context: Context) {
               private val file = File(context.filesDir, "profit_control_db.json")
               private val pref = context.getSharedPreferences("profit_prefs", Context.MODE_PRIVATE)
@@ -386,7 +377,6 @@ jobs:
               }
           }
 
-          // MAIN ACTIVITY
           class MainActivity : ComponentActivity() {
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
@@ -530,7 +520,6 @@ jobs:
               }
           }
 
-          // 1. SCREEN HOME (DASHBOARD)
           @Composable
           fun HomeScreen(
               products: List<ProductItem>,
@@ -616,7 +605,7 @@ jobs:
                               .padding(end = 6.dp),
                           colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
                           shape = RoundedCornerShape(12.dp)
-                          ) {
+                      ) {
                           Column(modifier = Modifier.padding(16.dp)) {
                               Text("Perlu Perhatian", fontSize = 12.sp, color = Color(0xFFE65100))
                               Spacer(Modifier.height(6.dp))
@@ -674,7 +663,6 @@ jobs:
               }
           }
 
-          // 2. SCREEN HITUNG (AFFILIATE % & FULL SCROLL)
           @Composable
           fun HitungScreen(
               targetMargin: Double,
@@ -689,7 +677,7 @@ jobs:
               var opsText by remember { mutableStateOf("1500") }
               var returText by remember { mutableStateOf("2.0") }
               var adsText by remember { mutableStateOf("5000") }
-              var affPercentText by remember { mutableStateOf("5.0") } // Default 5%
+              var affPercentText by remember { mutableStateOf("5.0") }
 
               val context = LocalContext.current
 
@@ -847,7 +835,6 @@ jobs:
 
                   Spacer(Modifier.height(18.dp))
 
-                  // KARTU HASIL KALKULASI REAL-TIME
                   val (statusBg, statusColor) = when (result.status) {
                       "SEHAT" -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
                       "TIPIS" -> Color(0xFFFFF3E0) to Color(0xFFE65100)
@@ -948,12 +935,10 @@ jobs:
                       Text("Simpan Produk", fontSize = 15.sp, fontWeight = FontWeight.Bold)
                   }
 
-                  // PADDING BAWAH LEGA SUPAYA TIDAK BERTUBRUKAN DENGAN NAVBAR
                   Spacer(Modifier.height(130.dp))
               }
           }
 
-          // 3. SCREEN SIMULASI (AFFILIATE % & REAKTIVITAS INSTAN)
           @Composable
           fun SimulasiScreen(
               products: List<ProductItem>,
@@ -1109,7 +1094,6 @@ jobs:
 
                       Spacer(Modifier.height(16.dp))
 
-                      // KOMPARASI SEBELUM VS SESUDAH
                       Row(modifier = Modifier.fillMaxWidth()) {
                           Card(
                               modifier = Modifier.weight(1f).padding(end = 4.dp),
@@ -1151,7 +1135,6 @@ jobs:
 
                       Spacer(Modifier.height(14.dp))
 
-                      // DAMPAK PERUBAHAN
                       val diffProfit = if (beforeResult != null && afterResult != null) {
                           afterResult!!.netProfit.subtract(beforeResult.netProfit)
                       } else {
@@ -1183,7 +1166,6 @@ jobs:
               }
           }
 
-          // 4. SCREEN PRODUK
           @Composable
           fun ProdukScreen(
               products: List<ProductItem>,
@@ -1336,7 +1318,6 @@ jobs:
               }
           }
 
-          // 5. SCREEN SETTING (FIX EDIT TARGET MARGIN)
           @Composable
           fun SettingScreen(
               targetMargin: Double,
@@ -1491,8 +1472,8 @@ jobs:
                                   value = backupJsonText,
                                   onValueChange = { backupJsonText = it },
                                   modifier = Modifier
-                                      .fillMaxWidth()
-                                      .height(150.dp),
+                                  .fillMaxWidth()
+                                  .height(150.dp),
                                   textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
                               )
                               Spacer(Modifier.height(6.dp))
@@ -1543,5 +1524,5 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ProfitControl-V1.0.2-AffiliatePercent
+          name: ProfitControl-V1.0.2-Fixed
           path: app/build/outputs/apk/debug/app-debug.apk
