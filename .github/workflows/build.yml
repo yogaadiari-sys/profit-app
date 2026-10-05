@@ -357,7 +357,7 @@ jobs:
                       status = status,
                       bepRoas = bepRoas,
                       maxAdsLimit = maxAds,
-                      maxAffiliatePercentLimit = maxAffiliatePercent,
+                      maxAffiliatePercentLimit = maxAffPercent,
                       affiliateNominal = affiliateNominal
                   )
               }
@@ -1754,8 +1754,8 @@ jobs:
                                   value = backupJsonText,
                                   onValueChange = { backupJsonText = it },
                                   modifier = Modifier
-                                      .fillMaxWidth()
-                                      .height(150.dp),
+                                  .fillMaxWidth()
+                                  .height(150.dp),
                                   textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
                               )
                               Spacer(Modifier.height(6.dp))
