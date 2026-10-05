@@ -28,10 +28,8 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      - name: Clean and Generate Android Project Structure
+      - name: Generate Android Project Structure & Icons
         run: |
-          rm -rf app/src/main/res/drawable/*
-          rm -rf app/src/main/res/mipmap-anydpi-v26/*
           mkdir -p app/src/main/java/com/profitcontrol/app
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
@@ -136,7 +134,6 @@ jobs:
           }
           EOF
 
-          # BACKGROUND VECTOR SOLID EMERALD
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_background.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -149,7 +146,6 @@ jobs:
           </vector>
           EOF
 
-          # FOREGROUND VECTOR CHART & ARROW
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_foreground.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -518,7 +514,7 @@ jobs:
                           containerColor = Color.White,
                           tonalElevation = 6.dp
                       ) {
-                          NavTab.entries.forEach { tab ->
+                          NavTab.values().forEach { tab ->
                               NavigationBarItem(
                                   selected = currentTab == tab,
                                   onClick = { currentTab = tab },
@@ -1559,7 +1555,6 @@ jobs:
                   )
                   Spacer(Modifier.height(16.dp))
 
-                  // PANDUAN RINGKAS 3 LANGKAH
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
@@ -1583,7 +1578,6 @@ jobs:
 
                   Spacer(Modifier.height(14.dp))
 
-                  // Q&A MANDIRI (TANPA ANIMASI & MENGGUNAKAN BOX PEMBATAS UNIVERSAL)
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
@@ -1598,7 +1592,6 @@ jobs:
                           )
                           Spacer(Modifier.height(10.dp))
 
-                          // Q1
                           Column(modifier = Modifier.fillMaxWidth().clickable { openQ1 = !openQ1 }) {
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                   Text("Apa itu BEP ROAS Minimum?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
@@ -1617,7 +1610,6 @@ jobs:
                           Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE2E8F0)))
                           Spacer(Modifier.height(8.dp))
 
-                          // Q2
                           Column(modifier = Modifier.fillMaxWidth().clickable { openQ2 = !openQ2 }) {
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                   Text("Batas Aman Iklan (Max Ads)?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
@@ -1636,7 +1628,6 @@ jobs:
                           Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE2E8F0)))
                           Spacer(Modifier.height(8.dp))
 
-                          // Q3
                           Column(modifier = Modifier.fillMaxWidth().clickable { openQ3 = !openQ3 }) {
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                   Text("Apakah data aman & butuh internet?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
@@ -1656,7 +1647,6 @@ jobs:
 
                   Spacer(Modifier.height(14.dp))
 
-                  // TARGET MARGIN DEFAULT
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
@@ -1698,7 +1688,6 @@ jobs:
 
                   Spacer(Modifier.height(14.dp))
 
-                  // BACKUP & RESTORE
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
@@ -1784,8 +1773,8 @@ jobs:
                                   value = backupJsonText,
                                   onValueChange = { backupJsonText = it },
                                   modifier = Modifier
-                                      .fillMaxWidth()
-                                      .height(150.dp),
+                                  .fillMaxWidth()
+                                  .height(150.dp),
                                   textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
                               )
                               Spacer(Modifier.height(6.dp))
