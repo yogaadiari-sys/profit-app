@@ -134,7 +134,7 @@ jobs:
           }
           EOF
 
-          # BACKGROUND VECTOR HIJAU EMERALD RESMI
+          # BACKGROUND VECTOR HIJAU EMERALD
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_background.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -216,7 +216,6 @@ jobs:
           import android.widget.Toast
           import androidx.activity.ComponentActivity
           import androidx.activity.compose.setContent
-          import androidx.compose.animation.AnimatedVisibility
           import androidx.compose.foundation.background
           import androidx.compose.foundation.clickable
           import androidx.compose.foundation.layout.*
@@ -1591,7 +1590,7 @@ jobs:
                                   Text("Apa itu BEP ROAS Minimum?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
                                   Text(if (expandedQ1) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
                               }
-                              AnimatedVisibility(visible = expandedQ1) {
+                              if (expandedQ1) {
                                   Text(
                                       "Nilai efektivitas balik modal iklan Anda. Jika BEP ROAS toko tertulis 3.0x, maka hasil iklan marketplace minimal harus 3.0x. Bila di bawah itu, iklan Anda sedang membakar uang rugi.",
                                       fontSize = 12.sp,
@@ -1607,7 +1606,7 @@ jobs:
                                   Text("Batas Aman Iklan (Max Ads)?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
                                   Text(if (expandedQ2) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
                               }
-                              AnimatedVisibility(visible = expandedQ2) {
+                              if (expandedQ2) {
                                   Text(
                                       "Biaya iklan maksimal per order yang boleh dikeluarkan sebelum produk mengalami kerugian bersih.",
                                       fontSize = 12.sp,
@@ -1623,7 +1622,7 @@ jobs:
                                   Text("Apakah data aman & butuh internet?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
                                   Text(if (expandedQ3) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
                               }
-                              AnimatedVisibility(visible = expandedQ3) {
+                              if (expandedQ3) {
                                   Text(
                                       "Aplikasi 100% offline. Semua data tersimpan aman di HP Anda sendiri tanpa dikirim ke server luar manapun.",
                                       fontSize = 12.sp,
