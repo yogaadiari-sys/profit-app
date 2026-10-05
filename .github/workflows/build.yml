@@ -1,8 +1,8 @@
-name: Build Profit Control V1
+name: Build Profit Control APK
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
   workflow_dispatch:
 
 jobs:
@@ -19,32 +19,30 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android Licenses
+        run: |
+          yes | sdkmanager --licenses || true
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: '8.4'
 
-      - name: Accept Android SDK Licenses
+      - name: Generate Android Project Structure
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
-
-      - name: Clean & Scaffold Android V1 Project
-        run: |
-          # 1. Bersihkan sisa build lama
-          rm -rf app settings.gradle* build.gradle* gradle.properties
-
-          # 2. Buat struktur folder
           mkdir -p app/src/main/java/com/profitcontrol/app
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/mipmap-hdpi
 
-          # 3. gradle.properties
           cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m
           android.useAndroidX=true
           android.nonTransitiveRClass=true
-          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           EOF
 
-          # 4. settings.gradle.kts (Bebas Restriksi Repositori)
           cat << 'EOF' > settings.gradle.kts
           pluginManagement {
               repositories {
@@ -53,25 +51,24 @@ jobs:
                   gradlePluginPortal()
               }
           }
-          rootProject.name = "ProfitControl"
-          include(":app")
-          EOF
-
-          # 5. Root build.gradle.kts
-          cat << 'EOF' > build.gradle.kts
-          plugins {
-              id("com.android.application") version "8.2.2" apply false
-              id("org.jetbrains.kotlin.android") version "1.9.22" apply false
-          }
-          allprojects {
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
               repositories {
                   google()
                   mavenCentral()
               }
           }
+          rootProject.name = "ProfitControl"
+          include(":app")
           EOF
 
-          # 6. app/build.gradle.kts
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.2.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.22" apply false
+          }
+          EOF
+
           cat << 'EOF' > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -86,14 +83,22 @@ jobs:
                   applicationId = "com.profitcontrol.app"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 1
-                  versionName = "1.0"
+                  versionCode = 3
+                  versionName = "1.0.2"
+
+                  testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+                  vectorDrawables {
+                      useSupportLibrary = true
+                  }
               }
 
               buildTypes {
                   release {
                       isMinifyEnabled = false
-                      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+                      proguardFiles(
+                          getDefaultProguardFile("proguard-android-optimize.txt"),
+                          "proguard-rules.pro"
+                      )
                   }
               }
               compileOptions {
@@ -109,20 +114,28 @@ jobs:
               composeOptions {
                   kotlinCompilerExtensionVersion = "1.5.8"
               }
+              packaging {
+                  resources {
+                      excludes += "/META-INF/{AL2.0,LGPL2.1}"
+                  }
+              }
           }
 
           dependencies {
-              implementation(platform("androidx.compose:compose-bom:2024.02.00"))
-              implementation("androidx.compose.ui:ui")
-              implementation("androidx.compose.material3:material3")
-              implementation("androidx.compose.ui:ui-tooling-preview")
+              val composeBom = platform("androidx.compose:compose-bom:2024.02.00")
+              implementation(composeBom)
+              implementation("androidx.core:core-ktx:1.12.0")
+              implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
               implementation("androidx.activity:activity-compose:1.8.2")
-              implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
+              implementation("androidx.compose.ui:ui")
+              implementation("androidx.compose.ui:ui-graphics")
+              implementation("androidx.compose.ui:ui-tooling-preview")
+              implementation("androidx.compose.material3:material3")
+              implementation("androidx.compose.material:material-icons-core")
               implementation("com.google.code.gson:gson:2.10.1")
           }
           EOF
 
-          # 7. AndroidManifest.xml
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -136,7 +149,8 @@ jobs:
                   <activity
                       android:name=".MainActivity"
                       android:exported="true"
-                      android:windowSoftInputMode="adjustResize">
+                      android:windowSoftInputMode="adjustResize"
+                      android:theme="@android:style/Theme.Material.Light.NoActionBar">
                       <intent-filter>
                           <action android:name="android.intent.action.MAIN" />
                           <category android:name="android.intent.category.LAUNCHER" />
@@ -146,155 +160,18 @@ jobs:
           </manifest>
           EOF
 
-          # 8. ProfitEngine.kt (Audit Terverifikasi)
-          cat << 'EOF' > app/src/main/java/com/profitcontrol/app/ProfitEngine.kt
-          package com.profitcontrol.app
-
-          import java.math.BigDecimal
-          import java.math.RoundingMode
-
-          data class ProductInput(
-              val id: String = java.util.UUID.randomUUID().toString(),
-              val name: String,
-              val sellingPrice: BigDecimal,
-              val cogs: BigDecimal,
-              val marketplaceFeePercent: BigDecimal,
-              val fixedFee: BigDecimal,
-              val packagingCost: BigDecimal,
-              val operationalCost: BigDecimal,
-              val returnReservePercent: BigDecimal,
-              val targetAdsBudget: BigDecimal,
-              val targetAffiliateCommission: BigDecimal
-          )
-
-          data class CalculationResult(
-              val totalFeeNominal: BigDecimal,
-              val netRevenue: BigDecimal,
-              val profitBeforeAds: BigDecimal,
-              val netProfit: BigDecimal,
-              val netProfitMarginPercent: BigDecimal,
-              val bepRoas: BigDecimal,
-              val maxSafeAdsBudget: BigDecimal,
-              val maxSafeAffiliateNominal: BigDecimal,
-              val status: String
-          )
-
-          object ProfitEngine {
-              private val HUNDRED = BigDecimal("100")
-              private val ZERO = BigDecimal.ZERO
-
-              fun calculate(input: ProductInput): CalculationResult {
-                  val price = input.sellingPrice
-                  
-                  val feeMarketplace = price.multiply(input.marketplaceFeePercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
-                  val returnReserve = price.multiply(input.returnReservePercent).divide(HUNDRED, 2, RoundingMode.HALF_UP)
-                  val totalDeductions = feeMarketplace.add(input.fixedFee).add(returnReserve)
-                  
-                  val netRevenue = price.subtract(totalDeductions)
-                  val totalBaseCost = input.cogs.add(input.packagingCost).add(input.operationalCost)
-                  
-                  val profitBeforeAds = netRevenue.subtract(totalBaseCost)
-                  val netProfit = profitBeforeAds.subtract(input.targetAdsBudget).subtract(input.targetAffiliateCommission)
-                  
-                  val netMargin = if (price.compareTo(ZERO) > 0) {
-                      netProfit.multiply(HUNDRED).divide(price, 2, RoundingMode.HALF_UP)
-                  } else ZERO
-
-                  val bepRoas = if (profitBeforeAds.compareTo(ZERO) > 0) {
-                      price.divide(profitBeforeAds, 2, RoundingMode.HALF_UP)
-                  } else ZERO
-
-                  val maxAds = if (profitBeforeAds.compareTo(ZERO) > 0) profitBeforeAds.subtract(input.targetAffiliateCommission) else ZERO
-                  val maxAffiliate = if (profitBeforeAds.compareTo(ZERO) > 0) profitBeforeAds.subtract(input.targetAdsBudget) else ZERO
-
-                  val status = when {
-                      netProfit.compareTo(ZERO) < 0 -> "BONCOS"
-                      netMargin.compareTo(BigDecimal("15")) >= 0 -> "SEHAT"
-                      else -> "TIPIS"
-                  }
-
-                  return CalculationResult(
-                      totalFeeNominal = totalDeductions,
-                      netRevenue = netRevenue,
-                      profitBeforeAds = profitBeforeAds,
-                      netProfit = netProfit,
-                      netProfitMarginPercent = netMargin,
-                      bepRoas = bepRoas,
-                      maxSafeAdsBudget = if (maxAds.compareTo(ZERO) > 0) maxAds else ZERO,
-                      maxSafeAffiliateNominal = if (maxAffiliate.compareTo(ZERO) > 0) maxAffiliate else ZERO,
-                      status = status
-                  )
-              }
-          }
+          cat << 'EOF' > app/src/main/res/values/strings.xml
+          <resources>
+              <string name="app_name">Profit Control</string>
+          </resources>
           EOF
 
-          # 9. ProfitRepository.kt
-          cat << 'EOF' > app/src/main/java/com/profitcontrol/app/ProfitRepository.kt
-          package com.profitcontrol.app
-
-          import android.content.Context
-          import com.google.gson.Gson
-          import com.google.gson.reflect.TypeToken
-          import java.io.File
-          import java.io.FileOutputStream
-
-          class ProfitRepository(private val context: Context) {
-              private val fileName = "profit_products_v1.json"
-              private val gson = Gson()
-
-              @Synchronized
-              fun saveProducts(products: List<ProductInput>): Boolean {
-                  return try {
-                      val file = File(context.filesDir, fileName)
-                      val tempFile = File(context.filesDir, "$fileName.tmp")
-                      val jsonString = gson.toJson(products)
-
-                      FileOutputStream(tempFile).use { fos ->
-                          fos.write(jsonString.toByteArray(Charsets.UTF_8))
-                          fos.flush()
-                      }
-                      tempFile.renameTo(file)
-                  } catch (e: Exception) {
-                      e.printStackTrace()
-                      false
-                  }
-              }
-
-              @Synchronized
-              fun loadProducts(): List<ProductInput> {
-                  return try {
-                      val file = File(context.filesDir, fileName)
-                      if (!file.exists()) return emptyList()
-                      val jsonString = file.readText(Charsets.UTF_8)
-                      val type = object : TypeToken<List<ProductInput>>() {}.type
-                      gson.fromJson(jsonString, type) ?: emptyList()
-                  } catch (e: Exception) {
-                      e.printStackTrace()
-                      emptyList()
-                  }
-              }
-
-              fun exportJson(): String {
-                  val list = loadProducts()
-                  return gson.toJson(list)
-              }
-
-              fun importJson(json: String): Boolean {
-                  return try {
-                      val type = object : TypeToken<List<ProductInput>>() {}.type
-                      val list: List<ProductInput> = gson.fromJson(json, type)
-                      saveProducts(list)
-                  } catch (e: Exception) {
-                      false
-                  }
-              }
-          }
-          EOF
-
-          # 10. MainActivity.kt (Lengkap 5 Layar & Layout Rapi)
+      - name: Inject Source Code with UI, Affiliate %, & Scroll Fixes
+        run: |
           cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
           package com.profitcontrol.app
 
+          import android.content.Context
           import android.os.Bundle
           import android.widget.Toast
           import androidx.activity.ComponentActivity
@@ -304,779 +181,1352 @@ jobs:
           import androidx.compose.foundation.layout.*
           import androidx.compose.foundation.lazy.LazyColumn
           import androidx.compose.foundation.lazy.items
+          import androidx.compose.foundation.rememberScrollState
           import androidx.compose.foundation.shape.RoundedCornerShape
           import androidx.compose.foundation.text.KeyboardOptions
+          import androidx.compose.foundation.verticalScroll
+          import androidx.compose.material.icons.Icons
+          import androidx.compose.material.icons.filled.*
           import androidx.compose.material3.*
           import androidx.compose.runtime.*
           import androidx.compose.ui.Alignment
           import androidx.compose.ui.Modifier
+          import androidx.compose.ui.draw.clip
           import androidx.compose.ui.graphics.Color
+          import androidx.compose.ui.platform.LocalClipboardManager
           import androidx.compose.ui.platform.LocalContext
+          import androidx.compose.ui.text.AnnotatedString
           import androidx.compose.ui.text.font.FontWeight
           import androidx.compose.ui.text.input.KeyboardType
+          import androidx.compose.ui.text.style.TextAlign
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
+          import com.google.gson.Gson
+          import com.google.gson.reflect.TypeToken
+          import java.io.File
           import java.math.BigDecimal
-          import java.text.DecimalFormat
+          import java.math.RoundingMode
+          import java.text.NumberFormat
+          import java.util.Locale
+          import java.util.UUID
 
+          // DATA MODELS
+          data class ProductItem(
+              val id: String = UUID.randomUUID().toString(),
+              val name: String,
+              val sellingPrice: Double,
+              val cogs: Double,
+              val marketplaceFeePercent: Double,
+              val fixedFee: Double,
+              val packagingCost: Double,
+              val operationalCost: Double,
+              val returnReservePercent: Double,
+              val targetAds: Double,
+              val targetAffiliatePercent: Double // Berubah jadi persen (%)
+          )
+
+          data class CalculationResult(
+              val netProfit: BigDecimal,
+              val marginPercent: BigDecimal,
+              val status: String,
+              val bepRoas: BigDecimal,
+              val maxAdsLimit: BigDecimal,
+              val maxAffiliatePercentLimit: BigDecimal,
+              val affiliateNominal: BigDecimal
+          )
+
+          // ENGINE KEUANGAN BIGDECIMAL
+          object ProfitEngine {
+              fun calculate(
+                  sellingPrice: Double,
+                  cogs: Double,
+                  marketplaceFeePercent: Double,
+                  fixedFee: Double,
+                  packagingCost: Double,
+                  operationalCost: Double,
+                  returnReservePercent: Double,
+                  targetAds: Double,
+                  targetAffiliatePercent: Double,
+                  targetMarginDefault: Double = 20.0
+              ): CalculationResult {
+                  val price = BigDecimal.valueOf(sellingPrice)
+                  val hpp = BigDecimal.valueOf(cogs)
+                  val adminPercent = BigDecimal.valueOf(marketplaceFeePercent).divide(BigDecimal("100"), 4, RoundingMode.HALF_UP)
+                  val returPercent = BigDecimal.valueOf(returnReservePercent).divide(BigDecimal("100"), 4, RoundingMode.HALF_UP)
+                  val affPercent = BigDecimal.valueOf(targetAffiliatePercent).divide(BigDecimal("100"), 4, RoundingMode.HALF_UP)
+                  val fixed = BigDecimal.valueOf(fixedFee)
+                  val pack = BigDecimal.valueOf(packagingCost)
+                  val ops = BigDecimal.valueOf(operationalCost)
+                  val ads = BigDecimal.valueOf(targetAds)
+
+                  val adminFeeNominal = price.multiply(adminPercent)
+                  val returNominal = price.multiply(returPercent)
+                  val affiliateNominal = price.multiply(affPercent).setScale(2, RoundingMode.HALF_UP)
+
+                  val totalCost = hpp.add(adminFeeNominal)
+                      .add(fixed)
+                      .add(pack)
+                      .add(ops)
+                      .add(returNominal)
+                      .add(ads)
+                      .add(affiliateNominal)
+
+                  val netProfit = price.subtract(totalCost).setScale(2, RoundingMode.HALF_UP)
+
+                  val marginPercent = if (price.compareTo(BigDecimal.ZERO) > 0) {
+                      netProfit.divide(price, 4, RoundingMode.HALF_UP).multiply(BigDecimal("100")).setScale(2, RoundingMode.HALF_UP)
+                  } else {
+                      BigDecimal.ZERO
+                  }
+
+                  val status = when {
+                      netProfit < BigDecimal.ZERO -> "BONCOS"
+                      marginPercent >= BigDecimal.valueOf(targetMarginDefault) -> "SEHAT"
+                      else -> "TIPIS"
+                  }
+
+                  val grossMarginBeforePromo = price.subtract(hpp.add(adminFeeNominal).add(fixed).add(pack).add(ops).add(returNominal))
+
+                  val bepRoas = if (grossMarginBeforePromo > BigDecimal.ZERO && price > BigDecimal.ZERO) {
+                      price.divide(grossMarginBeforePromo, 2, RoundingMode.HALF_UP)
+                  } else {
+                      BigDecimal.ZERO
+                  }
+
+                  val maxAds = if (grossMarginBeforePromo.subtract(affiliateNominal) > BigDecimal.ZERO) {
+                      grossMarginBeforePromo.subtract(affiliateNominal).setScale(2, RoundingMode.HALF_UP)
+                  } else {
+                      BigDecimal.ZERO
+                  }
+
+                  val maxAffPercent = if (grossMarginBeforePromo.subtract(ads) > BigDecimal.ZERO && price > BigDecimal.ZERO) {
+                      grossMarginBeforePromo.subtract(ads).divide(price, 4, RoundingMode.HALF_UP).multiply(BigDecimal("100")).setScale(2, RoundingMode.HALF_UP)
+                  } else {
+                      BigDecimal.ZERO
+                  }
+
+                  return CalculationResult(
+                      netProfit = netProfit,
+                      marginPercent = marginPercent,
+                      status = status,
+                      bepRoas = bepRoas,
+                      maxAdsLimit = maxAds,
+                      maxAffiliatePercentLimit = maxAffPercent,
+                      affiliateNominal = affiliateNominal
+                  )
+              }
+
+              fun formatRupiah(amount: BigDecimal): String {
+                  val formatter = NumberFormat.getCurrencyInstance(Locale("in", "ID"))
+                  formatter.maximumFractionDigits = 0
+                  return formatter.format(amount).replace("Rp", "Rp ")
+              }
+
+              fun formatRupiah(amount: Double): String {
+                  return formatRupiah(BigDecimal.valueOf(amount))
+              }
+          }
+
+          // REPOSITORY PERSISTENSI OFFLINE
+          class ProfitRepository(private val context: Context) {
+              private val file = File(context.filesDir, "profit_control_db.json")
+              private val pref = context.getSharedPreferences("profit_prefs", Context.MODE_PRIVATE)
+              private val gson = Gson()
+
+              fun getTargetMargin(): Double {
+                  return pref.getFloat("target_margin", 20.0f).toDouble()
+              }
+
+              fun setTargetMargin(margin: Double) {
+                  pref.edit().putFloat("target_margin", margin.toFloat()).apply()
+              }
+
+              fun loadProducts(): List<ProductItem> {
+                  return try {
+                      if (!file.exists()) {
+                          val sample = listOf(
+                              ProductItem(name = "Kemeja", sellingPrice = 95000.0, cogs = 50000.0, marketplaceFeePercent = 6.5, fixedFee = 1000.0, packagingCost = 2000.0, operationalCost = 1500.0, returnReservePercent = 2.0, targetAds = 5000.0, targetAffiliatePercent = 5.0),
+                              ProductItem(name = "Celana", sellingPrice = 90000.0, cogs = 60000.0, marketplaceFeePercent = 8.0, fixedFee = 2000.0, packagingCost = 2000.0, operationalCost = 1500.0, returnReservePercent = 2.0, targetAds = 5000.0, targetAffiliatePercent = 10.0),
+                              ProductItem(name = "Sepatu", sellingPrice = 100000.0, cogs = 80000.0, marketplaceFeePercent = 8.5, fixedFee = 1000.0, packagingCost = 2500.0, operationalCost = 1500.0, returnReservePercent = 2.0, targetAds = 5000.0, targetAffiliatePercent = 10.0)
+                          )
+                          saveProducts(sample)
+                          sample
+                      } else {
+                          val json = file.readText()
+                          val type = object : TypeToken<List<ProductItem>>() {}.type
+                          gson.fromJson(json, type) ?: emptyList()
+                      }
+                  } catch (e: Exception) {
+                      emptyList()
+                  }
+              }
+
+              fun saveProducts(products: List<ProductItem>) {
+                  try {
+                      val json = gson.toJson(products)
+                      val temp = File(context.filesDir, "profit_control_db.tmp")
+                      temp.writeText(json)
+                      temp.renameTo(file)
+                  } catch (_: Exception) {}
+              }
+
+              fun getRawJson(): String {
+                  return if (file.exists()) file.readText() else "[]"
+              }
+
+              fun restoreRawJson(raw: String): Boolean {
+                  return try {
+                      val type = object : TypeToken<List<ProductItem>>() {}.type
+                      val parsed: List<ProductItem> = gson.fromJson(raw, type)
+                      saveProducts(parsed)
+                      true
+                  } catch (e: Exception) {
+                      false
+                  }
+              }
+          }
+
+          // MAIN ACTIVITY
           class MainActivity : ComponentActivity() {
-              private lateinit var repo: ProfitRepository
-
               override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
-                  repo = ProfitRepository(applicationContext)
-
+                  val repository = ProfitRepository(this)
                   setContent {
-                      MaterialTheme(
-                          colorScheme = lightColorScheme(
-                              primary = Color(0xFF006A60),
-                              secondary = Color(0xFF4A635F),
-                              background = Color(0xFFFBFDFB)
-                          )
-                      ) {
-                          Surface(modifier = Modifier.fillMaxSize()) {
-                              MainAppView(repo)
+                      ProfitControlTheme {
+                          Surface(
+                              modifier = Modifier.fillMaxSize(),
+                              color = MaterialTheme.colorScheme.background
+                          ) {
+                              MainApp(repository)
                           }
                       }
                   }
               }
           }
 
-          fun formatRupiah(amount: BigDecimal): String {
-              val df = DecimalFormat("#,###")
-              return "Rp" + df.format(amount).replace(',', '.')
+          @Composable
+          fun ProfitControlTheme(content: @Composable () -> Unit) {
+              MaterialTheme(
+                  colorScheme = lightColorScheme(
+                      primary = Color(0xFF006D5B),
+                      secondary = Color(0xFF26A69A),
+                      background = Color(0xFFFBFDFD),
+                      surface = Color(0xFFFFFFFF),
+                      surfaceVariant = Color(0xFFF0F4F4),
+                      error = Color(0xFFBA1A1A)
+                  ),
+                  content = content
+              )
+          }
+
+          enum class NavTab(val title: String, val icon: @Composable () -> Unit) {
+              HOME("Home", { Icon(Icons.Default.Home, contentDescription = "Home") }),
+              HITUNG("Hitung", { Icon(Icons.Default.AddCircle, contentDescription = "Hitung") }),
+              SIMULASI("Simulasi", { Icon(Icons.Default.CheckCircle, contentDescription = "Simulasi") }),
+              PRODUK("Produk", { Icon(Icons.Default.List, contentDescription = "Produk") }),
+              SETTING("Setting", { Icon(Icons.Default.Settings, contentDescription = "Setting") })
           }
 
           @Composable
-          fun MainAppView(repo: ProfitRepository) {
-              var selectedTab by remember { mutableIntStateOf(0) }
-              var productList by remember { mutableStateOf(repo.loadProducts()) }
+          fun MainApp(repository: ProfitRepository) {
+              var currentTab by remember { mutableStateOf(NavTab.HOME) }
+              var products by remember { mutableStateOf(repository.loadProducts()) }
+              var targetMargin by remember { mutableDoubleStateOf(repository.getTargetMargin()) }
 
               Scaffold(
                   topBar = {
                       Column(
                           modifier = Modifier
                               .fillMaxWidth()
-                              .background(Color(0xFF006A60))
-                              .padding(horizontal = 20.dp, vertical = 14.dp)
+                              .background(Color(0xFF005B4C))
+                              .padding(top = 36.dp, bottom = 14.dp, start = 16.dp, end = 16.dp)
                       ) {
-                          Text("PROFIT CONTROL", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                          Text("Omzet besar belum tentu untung.", fontSize = 12.sp, color = Color(0xFFB0D3CD))
+                          Text(
+                              text = "PROFIT CONTROL",
+                              fontSize = 20.sp,
+                              fontWeight = FontWeight.Bold,
+                              color = Color.White
+                          )
+                          Text(
+                              text = "Omzet besar belum tentu untung.",
+                              fontSize = 12.sp,
+                              color = Color(0xFFB2DFDB)
+                          )
                       }
                   },
                   bottomBar = {
                       NavigationBar(
                           containerColor = Color.White,
-                          tonalElevation = 8.dp
+                          tonalElevation = 6.dp
                       ) {
-                          val items = listOf("Home", "Hitung", "Simulasi", "Produk", "Setting")
-                          items.forEachIndexed { index, label ->
+                          NavTab.values().forEach { tab ->
                               NavigationBarItem(
-                                  selected = selectedTab == index,
-                                  onClick = { selectedTab = index },
-                                  icon = {
-                                      Text(
-                                          text = when(index) {
-                                              0 -> "📊"
-                                              1 -> "🧮"
-                                              2 -> "⚖️"
-                                              3 -> "📋"
-                                              else -> "⚙️"
-                                          },
-                                          fontSize = 18.sp
-                                      )
-                                  },
+                                  selected = currentTab == tab,
+                                  onClick = { currentTab = tab },
+                                  icon = tab.icon,
                                   label = {
                                       Text(
-                                          label,
+                                          text = tab.title,
                                           fontSize = 11.sp,
-                                          maxLines = 1,
-                                          fontWeight = if (selectedTab == index) FontWeight.Bold else FontWeight.Normal
+                                          fontWeight = if (currentTab == tab) FontWeight.Bold else FontWeight.Normal
                                       )
                                   },
-                                  alwaysShowLabel = true
+                                  colors = NavigationBarItemDefaults.colors(
+                                      selectedIconColor = Color(0xFF006D5B),
+                                      selectedTextColor = Color(0xFF006D5B),
+                                      indicatorColor = Color(0xFFE0F2F1),
+                                      unselectedIconColor = Color(0xFF757575),
+                                      unselectedTextColor = Color(0xFF757575)
+                                  )
                               )
                           }
                       }
                   }
-              ) { paddingValues ->
-                  Box(modifier = Modifier.fillMaxSize().padding(paddingValues)) {
-                      when (selectedTab) {
-                          0 -> DashboardScreen(
-                              products = productList,
-                              onNavigateHitung = { selectedTab = 1 },
-                              onNavigateSimulasi = { selectedTab = 2 }
+              ) { innerPadding ->
+                  Box(modifier = Modifier.padding(innerPadding)) {
+                      when (currentTab) {
+                          NavTab.HOME -> HomeScreen(
+                              products = products,
+                              targetMargin = targetMargin,
+                              onNavigateToHitung = { currentTab = NavTab.HITUNG },
+                              onNavigateToSimulator = { currentTab = NavTab.SIMULASI }
                           )
-                          1 -> HitungScreen(
-                              onSaveProduct = { newProd ->
-                                  val updated = productList.filter { it.id != newProd.id } + newProd
-                                  if (repo.saveProducts(updated)) {
-                                      productList = updated
-                                  }
+                          NavTab.HITUNG -> HitungScreen(
+                              targetMargin = targetMargin,
+                              onSaveProduct = { newProduct ->
+                                  val updated = products + newProduct
+                                  products = updated
+                                  repository.saveProducts(updated)
+                                  currentTab = NavTab.PRODUK
                               }
                           )
-                          2 -> SimulatorScreen(products = productList)
-                          3 -> ProductListScreen(
-                              products = productList,
-                              onDelete = { prod ->
-                                  val updated = productList.filter { it.id != prod.id }
-                                  if (repo.saveProducts(updated)) {
-                                      productList = updated
-                                  }
+                          NavTab.SIMULASI -> SimulasiScreen(
+                              products = products,
+                              targetMargin = targetMargin
+                          )
+                          NavTab.PRODUK -> ProdukScreen(
+                              products = products,
+                              targetMargin = targetMargin,
+                              onDeleteProduct = { id ->
+                                  val updated = products.filterNot { it.id == id }
+                                  products = updated
+                                  repository.saveProducts(updated)
                               }
                           )
-                          4 -> SettingsScreen(repo = repo, onReload = {
-                              productList = repo.loadProducts()
-                          })
-                      }
-                  }
-              }
-          }
-
-          @Composable
-          fun DashboardScreen(products: List<ProductInput>, onNavigateHitung: () -> Unit, onNavigateSimulasi: () -> Unit) {
-              val calculatedList = remember(products) {
-                  products.map { it to ProfitEngine.calculate(it) }
-              }
-
-              val totalProfit = remember(calculatedList) {
-                  calculatedList.fold(BigDecimal.ZERO) { acc, pair -> acc.add(pair.second.netProfit) }
-              }
-              val warningCount = remember(calculatedList) {
-                  calculatedList.count { it.second.status != "SEHAT" }
-              }
-              val bestProduct = remember(calculatedList) {
-                  calculatedList.maxByOrNull { it.second.netProfit }?.first?.name ?: "-"
-              }
-
-              LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                  item {
-                      Text("Ringkasan Profit Anda", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                  }
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                          Card(
-                              modifier = Modifier.weight(1f),
-                              colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
-                              shape = RoundedCornerShape(12.dp)
-                          ) {
-                              Column(modifier = Modifier.padding(14.dp)) {
-                                  Text("Total Net Profit", fontSize = 12.sp, color = Color(0xFF2E7D32))
-                                  Text(formatRupiah(totalProfit), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1B5E20))
-                              }
-                          }
-                          Card(
-                              modifier = Modifier.weight(1f),
-                              colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF3FB)),
-                              shape = RoundedCornerShape(12.dp)
-                          ) {
-                              Column(modifier = Modifier.padding(14.dp)) {
-                                  Text("Total Produk", fontSize = 12.sp, color = Color(0xFF1565C0))
-                                  Text("${products.size} Produk", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
-                              }
-                          }
-                      }
-                  }
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                          Card(
-                              modifier = Modifier.weight(1f),
-                              colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
-                              shape = RoundedCornerShape(12.dp)
-                          ) {
-                              Column(modifier = Modifier.padding(14.dp)) {
-                                  Text("Perlu Perhatian", fontSize = 12.sp, color = Color(0xFFE65100))
-                                  Text("$warningCount Item", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color(0xFFBF360C))
-                              }
-                          }
-                          Card(
-                              modifier = Modifier.weight(1f),
-                              colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F4F6)),
-                              shape = RoundedCornerShape(12.dp)
-                          ) {
-                              Column(modifier = Modifier.padding(14.dp)) {
-                                  Text("Profit Tertinggi", fontSize = 12.sp, color = Color(0xFF4B5563))
-                                  Text(
-                                      bestProduct.split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } },
-                                      fontSize = 16.sp,
-                                      fontWeight = FontWeight.Bold,
-                                      color = Color(0xFF111827),
-                                      maxLines = 1
-                                  )
-                              }
-                          }
-                      }
-                  }
-                  item {
-                      Text("Aksi Cepat", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                      Spacer(modifier = Modifier.height(4.dp))
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                          Button(
-                              onClick = onNavigateHitung,
-                              modifier = Modifier.weight(1f).height(48.dp),
-                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006A60)),
-                              shape = RoundedCornerShape(24.dp)
-                          ) {
-                              Text("+ Hitung Profit")
-                          }
-                          OutlinedButton(
-                              onClick = onNavigateSimulasi,
-                              modifier = Modifier.weight(1f).height(48.dp),
-                              shape = RoundedCornerShape(24.dp)
-                          ) {
-                              Text("Simulator")
-                          }
-                      }
-                  }
-                  item { Spacer(modifier = Modifier.height(90.dp)) }
-              }
-          }
-
-          @Composable
-          fun HitungScreen(onSaveProduct: (ProductInput) -> Unit) {
-              val context = LocalContext.current
-              var name by remember { mutableStateOf("") }
-              var price by remember { mutableStateOf("") }
-              var cogs by remember { mutableStateOf("") }
-              var feePct by remember { mutableStateOf("6.5") }
-              var fixedFee by remember { mutableStateOf("1000") }
-              var packCost by remember { mutableStateOf("2000") }
-              var opCost by remember { mutableStateOf("1500") }
-              var returnPct by remember { mutableStateOf("2.0") }
-              var adsBudget by remember { mutableStateOf("5000") }
-              var affComm by remember { mutableStateOf("0") }
-
-              val calcResult by remember(name, price, cogs, feePct, fixedFee, packCost, opCost, returnPct, adsBudget, affComm) {
-                  derivedStateOf {
-                      val p = price.toBigDecimalOrNull() ?: BigDecimal.ZERO
-                      val c = cogs.toBigDecimalOrNull() ?: BigDecimal.ZERO
-                      if (p > BigDecimal.ZERO && c > BigDecimal.ZERO) {
-                          val input = ProductInput(
-                              name = name.ifEmpty { "Produk Baru" },
-                              sellingPrice = p,
-                              cogs = c,
-                              marketplaceFeePercent = feePct.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                              fixedFee = fixedFee.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                              packagingCost = packCost.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                              operationalCost = opCost.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                              returnReservePercent = returnPct.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                              targetAdsBudget = adsBudget.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                              targetAffiliateCommission = affComm.toBigDecimalOrNull() ?: BigDecimal.ZERO
-                          )
-                          ProfitEngine.calculate(input)
-                      } else null
-                  }
-              }
-
-              LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                  item {
-                      Text("Hitung Profit Produk", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                  }
-                  item {
-                      OutlinedTextField(
-                          value = name,
-                          onValueChange = { name = it },
-                          label = { Text("Nama Produk *") },
-                          modifier = Modifier.fillMaxWidth()
-                      )
-                  }
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                          OutlinedTextField(
-                              value = price,
-                              onValueChange = { price = it },
-                              label = { Text("Harga Jual (Rp)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
-                          )
-                          OutlinedTextField(
-                              value = cogs,
-                              onValueChange = { cogs = it },
-                              label = { Text("HPP / Modal (Rp)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
-                          )
-                      }
-                  }
-                  item {
-                      Text("Biaya Marketplace", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray)
-                  }
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                          OutlinedTextField(
-                              value = feePct,
-                              onValueChange = { feePct = it },
-                              label = { Text("Admin (%)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
-                          )
-                          OutlinedTextField(
-                              value = fixedFee,
-                              onValueChange = { fixedFee = it },
-                              label = { Text("Fixed Fee (Rp)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
-                          )
-                      }
-                  }
-                  item {
-                      Text("Beban Operasional & Risiko", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray)
-                  }
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                          OutlinedTextField(
-                              value = packCost,
-                              onValueChange = { packCost = it },
-                              label = { Text("Packing (Rp)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
-                          )
-                          OutlinedTextField(
-                              value = opCost,
-                              onValueChange = { opCost = it },
-                              label = { Text("Operasional (Rp)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
-                          )
-                      }
-                  }
-                  item {
-                      Text("Promosi & Iklan", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color.Gray)
-                  }
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                          OutlinedTextField(
-                              value = adsBudget,
-                              onValueChange = { adsBudget = it },
-                              label = { Text("Iklan / Order (Rp)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
-                          )
-                          OutlinedTextField(
-                              value = affComm,
-                              onValueChange = { affComm = it },
-                              label = { Text("Affiliate (Rp)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
-                          )
-                      }
-                  }
-                  item {
-                      OutlinedTextField(
-                          value = returnPct,
-                          onValueChange = { returnPct = it },
-                          label = { Text("Cadangan Retur (%)") },
-                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                          modifier = Modifier.fillMaxWidth()
-                      )
-                  }
-
-                  calcResult?.let { res ->
-                      item {
-                          Card(
-                              modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
-                              colors = CardDefaults.cardColors(
-                                  containerColor = when (res.status) {
-                                      "SEHAT" -> Color(0xFFE8F5E9)
-                                      "TIPIS" -> Color(0xFFFFF9C4)
-                                      else -> Color(0xFFFFEBEE)
-                                  }
-                              ),
-                              shape = RoundedCornerShape(12.dp)
-                          ) {
-                              Column(modifier = Modifier.padding(16.dp)) {
-                                  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                                      Text("STATUS: ${res.status}", fontWeight = FontWeight.ExtraBold, fontSize = 18.sp, color = when (res.status) {
-                                          "SEHAT" -> Color(0xFF2E7D32)
-                                          "TIPIS" -> Color(0xFFF57F17)
-                                          else -> Color(0xFFC62828)
-                                      })
-                                      Text("${res.netProfitMarginPercent}% Margin", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                  }
-                                  Spacer(modifier = Modifier.height(8.dp))
-                                  Text("Profit Bersih: ${formatRupiah(res.netProfit)}")
-                                  Text("Profit Sebelum Iklan: ${formatRupiah(res.profitBeforeAds)}")
-                                  Text("BEP ROAS Minimal: ${res.bepRoas}x")
-                                  Text("Batas Aman Biaya Iklan: ${formatRupiah(res.maxSafeAdsBudget)}")
-                              }
-                          }
-                      }
-                      item {
-                          Button(
-                              onClick = {
-                                  val input = ProductInput(
-                                      name = name.ifEmpty { "Produk Baru" },
-                                      sellingPrice = price.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                                      cogs = cogs.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                                      marketplaceFeePercent = feePct.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                                      fixedFee = fixedFee.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                                      packagingCost = packCost.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                                      operationalCost = opCost.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                                      returnReservePercent = returnPct.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                                      targetAdsBudget = adsBudget.toBigDecimalOrNull() ?: BigDecimal.ZERO,
-                                      targetAffiliateCommission = affComm.toBigDecimalOrNull() ?: BigDecimal.ZERO
-                                  )
-                                  onSaveProduct(input)
-                                  Toast.makeText(context, "Data tersimpan!", Toast.LENGTH_SHORT).show()
+                          NavTab.SETTING -> SettingScreen(
+                              targetMargin = targetMargin,
+                              onSaveTargetMargin = { newTarget ->
+                                  targetMargin = newTarget
+                                  repository.setTargetMargin(newTarget)
                               },
-                              modifier = Modifier.fillMaxWidth().height(48.dp),
-                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006A60)),
-                              shape = RoundedCornerShape(24.dp)
-                          ) {
-                              Text("Simpan ke Data Lokal (Anti-Hilang)")
-                          }
+                              repository = repository,
+                              onDataRestored = {
+                                  products = repository.loadProducts()
+                                  targetMargin = repository.getTargetMargin()
+                              }
+                          )
                       }
                   }
-                  item { Spacer(modifier = Modifier.height(100.dp)) }
               }
           }
 
+          // 1. SCREEN HOME (DASHBOARD)
           @Composable
-          fun SimulatorScreen(products: List<ProductInput>) {
-              var selectedProduct by remember { mutableStateOf(products.firstOrNull()) }
-              var showProductPicker by remember { mutableStateOf(false) }
-
-              var simPrice by remember(selectedProduct) { mutableStateOf(selectedProduct?.sellingPrice?.toPlainString() ?: "100000") }
-              var simFeePct by remember(selectedProduct) { mutableStateOf(selectedProduct?.marketplaceFeePercent?.toPlainString() ?: "8.0") }
-              var simFixedFee by remember(selectedProduct) { mutableStateOf(selectedProduct?.fixedFee?.toPlainString() ?: "1250") }
-              var simAds by remember(selectedProduct) { mutableStateOf(selectedProduct?.targetAdsBudget?.toPlainString() ?: "5000") }
-              var simAff by remember(selectedProduct) { mutableStateOf(selectedProduct?.targetAffiliateCommission?.toPlainString() ?: "0") }
-
-              val beforeResult = remember(selectedProduct) {
-                  selectedProduct?.let { ProfitEngine.calculate(it) }
-              }
-
-              val afterResult by remember(selectedProduct, simPrice, simFeePct, simFixedFee, simAds, simAff) {
-                  derivedStateOf {
-                      val base = selectedProduct ?: ProductInput(
-                          name = "Simulasi",
-                          sellingPrice = BigDecimal("100000"),
-                          cogs = BigDecimal("45000"),
-                          marketplaceFeePercent = BigDecimal("8.0"),
-                          fixedFee = BigDecimal("1250"),
-                          packagingCost = BigDecimal("2000"),
-                          operationalCost = BigDecimal("1500"),
-                          returnReservePercent = BigDecimal("2.0"),
-                          targetAdsBudget = BigDecimal("5000"),
-                          targetAffiliateCommission = BigDecimal("0")
+          fun HomeScreen(
+              products: List<ProductItem>,
+              targetMargin: Double,
+              onNavigateToHitung: () -> Unit,
+              onNavigateToSimulator: () -> Unit
+          ) {
+              val results = remember(products, targetMargin) {
+                  products.map { p ->
+                      p to ProfitEngine.calculate(
+                          sellingPrice = p.sellingPrice,
+                          cogs = p.cogs,
+                          marketplaceFeePercent = p.marketplaceFeePercent,
+                          fixedFee = p.fixedFee,
+                          packagingCost = p.packagingCost,
+                          operationalCost = p.operationalCost,
+                          returnReservePercent = p.returnReservePercent,
+                          targetAds = p.targetAds,
+                          targetAffiliatePercent = p.targetAffiliatePercent,
+                          targetMarginDefault = targetMargin
                       )
-                      val updated = base.copy(
-                          sellingPrice = simPrice.toBigDecimalOrNull() ?: base.sellingPrice,
-                          marketplaceFeePercent = simFeePct.toBigDecimalOrNull() ?: base.marketplaceFeePercent,
-                          fixedFee = simFixedFee.toBigDecimalOrNull() ?: base.fixedFee,
-                          targetAdsBudget = simAds.toBigDecimalOrNull() ?: base.targetAdsBudget,
-                          targetAffiliateCommission = simAff.toBigDecimalOrNull() ?: base.targetAffiliateCommission
-                      )
-                      ProfitEngine.calculate(updated)
                   }
               }
 
-              LazyColumn(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                  item {
-                      Text("Simulator Fee & Biaya", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                      Text("Pilih produk untuk menguji skenario perubahan harga atau admin.", fontSize = 12.sp, color = Color.Gray)
-                  }
-                  item {
-                      OutlinedButton(
-                          onClick = { showProductPicker = true },
-                          modifier = Modifier.fillMaxWidth(),
-                          shape = RoundedCornerShape(8.dp)
+              val totalProfit = results.fold(BigDecimal.ZERO) { acc, pair -> acc.add(pair.second.netProfit) }
+              val attentionCount = results.count { it.second.status != "SEHAT" }
+              val topProduct = results.maxByOrNull { it.second.netProfit }?.first?.name?.replaceFirstChar { it.uppercase() } ?: "-"
+
+              Column(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .verticalScroll(rememberScrollState())
+                      .padding(16.dp)
+              ) {
+                  Text(
+                      text = "Ringkasan Profit Anda",
+                      fontSize = 20.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF1E293B)
+                  )
+                  Spacer(Modifier.height(16.dp))
+
+                  Row(modifier = Modifier.fillMaxWidth()) {
+                      Card(
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(end = 6.dp),
+                          colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                          shape = RoundedCornerShape(12.dp)
                       ) {
-                          Text("Target: ${selectedProduct?.name ?: "Pilih dari Produk Tersimpan"}")
+                          Column(modifier = Modifier.padding(16.dp)) {
+                              Text("Total Net Profit", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                              Spacer(Modifier.height(6.dp))
+                              Text(
+                                  ProfitEngine.formatRupiah(totalProfit),
+                                  fontSize = 16.sp,
+                                  fontWeight = FontWeight.Bold,
+                                  color = if (totalProfit >= BigDecimal.ZERO) Color(0xFF1B5E20) else Color(0xFFB71C1C)
+                              )
+                          }
+                      }
+                      Card(
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(start = 6.dp),
+                          colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
+                          shape = RoundedCornerShape(12.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(16.dp)) {
+                              Text("Total Produk", fontSize = 12.sp, color = Color(0xFF1565C0))
+                              Spacer(Modifier.height(6.dp))
+                              Text("${products.size} Produk", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
+                          }
                       }
                   }
-                  item {
+
+                  Spacer(Modifier.height(12.dp))
+
+                  Row(modifier = Modifier.fillMaxWidth()) {
+                      Card(
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(end = 6.dp),
+                          colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
+                          shape = RoundedCornerShape(12.dp)
+                          ) {
+                          Column(modifier = Modifier.padding(16.dp)) {
+                              Text("Perlu Perhatian", fontSize = 12.sp, color = Color(0xFFE65100))
+                              Spacer(Modifier.height(6.dp))
+                              Text("$attentionCount Item", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFBF360C))
+                          }
+                      }
+                      Card(
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(start = 6.dp),
+                          colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F4F6)),
+                          shape = RoundedCornerShape(12.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(16.dp)) {
+                              Text("Profit Tertinggi", fontSize = 12.sp, color = Color(0xFF4B5563))
+                              Spacer(Modifier.height(6.dp))
+                              Text(topProduct, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1F2937))
+                          }
+                      }
+                  }
+
+                  Spacer(Modifier.height(24.dp))
+                  Text(
+                      text = "Aksi Cepat",
+                      fontSize = 18.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF1E293B)
+                  )
+                  Spacer(Modifier.height(12.dp))
+
+                  Row(modifier = Modifier.fillMaxWidth()) {
+                      Button(
+                          onClick = onNavigateToHitung,
+                          modifier = Modifier
+                              .weight(1f)
+                              .height(48.dp)
+                              .padding(end = 6.dp),
+                          colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B)),
+                          shape = RoundedCornerShape(24.dp)
+                      ) {
+                          Text("+ Hitung Profit", fontWeight = FontWeight.SemiBold)
+                      }
+                      OutlinedButton(
+                          onClick = onNavigateToSimulator,
+                          modifier = Modifier
+                              .weight(1f)
+                              .height(48.dp)
+                              .padding(start = 6.dp),
+                          shape = RoundedCornerShape(24.dp)
+                      ) {
+                          Text("Simulator", color = Color(0xFF006D5B), fontWeight = FontWeight.SemiBold)
+                      }
+                  }
+                  Spacer(Modifier.height(40.dp))
+              }
+          }
+
+          // 2. SCREEN HITUNG (AFFILIATE % & FULL SCROLL)
+          @Composable
+          fun HitungScreen(
+              targetMargin: Double,
+              onSaveProduct: (ProductItem) -> Unit
+          ) {
+              var name by remember { mutableStateOf("") }
+              var priceText by remember { mutableStateOf("") }
+              var cogsText by remember { mutableStateOf("") }
+              var feeText by remember { mutableStateOf("6.5") }
+              var fixedText by remember { mutableStateOf("1000") }
+              var packingText by remember { mutableStateOf("2000") }
+              var opsText by remember { mutableStateOf("1500") }
+              var returText by remember { mutableStateOf("2.0") }
+              var adsText by remember { mutableStateOf("5000") }
+              var affPercentText by remember { mutableStateOf("5.0") } // Default 5%
+
+              val context = LocalContext.current
+
+              val price = priceText.toDoubleOrNull() ?: 0.0
+              val cogs = cogsText.toDoubleOrNull() ?: 0.0
+              val fee = feeText.toDoubleOrNull() ?: 0.0
+              val fixed = fixedText.toDoubleOrNull() ?: 0.0
+              val packing = packingText.toDoubleOrNull() ?: 0.0
+              val ops = opsText.toDoubleOrNull() ?: 0.0
+              val retur = returText.toDoubleOrNull() ?: 0.0
+              val ads = adsText.toDoubleOrNull() ?: 0.0
+              val affPercent = affPercentText.toDoubleOrNull() ?: 0.0
+
+              val result = remember(price, cogs, fee, fixed, packing, ops, retur, ads, affPercent, targetMargin) {
+                  ProfitEngine.calculate(
+                      sellingPrice = price,
+                      cogs = cogs,
+                      marketplaceFeePercent = fee,
+                      fixedFee = fixed,
+                      packagingCost = packing,
+                      operationalCost = ops,
+                      returnReservePercent = retur,
+                      targetAds = ads,
+                      targetAffiliatePercent = affPercent,
+                      targetMarginDefault = targetMargin
+                  )
+              }
+
+              Column(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .verticalScroll(rememberScrollState())
+                      .padding(16.dp)
+              ) {
+                  Text(
+                      text = "Hitung Profit Produk",
+                      fontSize = 20.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF1E293B)
+                  )
+                  Spacer(Modifier.height(14.dp))
+
+                  OutlinedTextField(
+                      value = name,
+                      onValueChange = { name = it },
+                      label = { Text("Nama Produk *") },
+                      modifier = Modifier.fillMaxWidth()
+                  )
+                  Spacer(Modifier.height(8.dp))
+
+                  Row(modifier = Modifier.fillMaxWidth()) {
                       OutlinedTextField(
-                          value = simPrice,
-                          onValueChange = { simPrice = it },
+                          value = priceText,
+                          onValueChange = { priceText = it },
+                          label = { Text("Harga Jual (Rp)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(end = 4.dp)
+                      )
+                      OutlinedTextField(
+                          value = cogsText,
+                          onValueChange = { cogsText = it },
+                          label = { Text("HPP / Modal (Rp)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(start = 4.dp)
+                      )
+                  }
+
+                  Spacer(Modifier.height(14.dp))
+                  Text("Biaya Marketplace", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+                  Spacer(Modifier.height(6.dp))
+
+                  Row(modifier = Modifier.fillMaxWidth()) {
+                      OutlinedTextField(
+                          value = feeText,
+                          onValueChange = { feeText = it },
+                          label = { Text("Admin (%)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(end = 4.dp)
+                      )
+                      OutlinedTextField(
+                          value = fixedText,
+                          onValueChange = { fixedText = it },
+                          label = { Text("Fixed Fee (Rp)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(start = 4.dp)
+                      )
+                  }
+
+                  Spacer(Modifier.height(14.dp))
+                  Text("Beban Operasional & Risiko", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+                  Spacer(Modifier.height(6.dp))
+
+                  Row(modifier = Modifier.fillMaxWidth()) {
+                      OutlinedTextField(
+                          value = packingText,
+                          onValueChange = { packingText = it },
+                          label = { Text("Packing (Rp)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(end = 4.dp)
+                      )
+                      OutlinedTextField(
+                          value = opsText,
+                          onValueChange = { opsText = it },
+                          label = { Text("Operasional (Rp)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(start = 4.dp)
+                      )
+                  }
+
+                  Spacer(Modifier.height(8.dp))
+                  OutlinedTextField(
+                      value = returText,
+                      onValueChange = { returText = it },
+                      label = { Text("Cadangan Retur (%)") },
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                      modifier = Modifier.fillMaxWidth()
+                  )
+
+                  Spacer(Modifier.height(14.dp))
+                  Text("Promosi, Iklan & Komisi", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+                  Spacer(Modifier.height(6.dp))
+
+                  Row(modifier = Modifier.fillMaxWidth()) {
+                      OutlinedTextField(
+                          value = adsText,
+                          onValueChange = { adsText = it },
+                          label = { Text("Iklan / Order (Rp)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(end = 4.dp)
+                      )
+                      OutlinedTextField(
+                          value = affPercentText,
+                          onValueChange = { affPercentText = it },
+                          label = { Text("Affiliate (%)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                          modifier = Modifier
+                              .weight(1f)
+                              .padding(start = 4.dp)
+                      )
+                  }
+
+                  Spacer(Modifier.height(18.dp))
+
+                  // KARTU HASIL KALKULASI REAL-TIME
+                  val (statusBg, statusColor) = when (result.status) {
+                      "SEHAT" -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
+                      "TIPIS" -> Color(0xFFFFF3E0) to Color(0xFFE65100)
+                      else -> Color(0xFFFFEBEE) to Color(0xFFC62828)
+                  }
+
+                  Card(
+                      modifier = Modifier.fillMaxWidth(),
+                      colors = CardDefaults.cardColors(containerColor = statusBg),
+                      shape = RoundedCornerShape(12.dp)
+                  ) {
+                      Column(modifier = Modifier.padding(16.dp)) {
+                          Row(
+                              modifier = Modifier.fillMaxWidth(),
+                              horizontalArrangement = Arrangement.SpaceBetween,
+                              verticalAlignment = Alignment.CenterVertically
+                          ) {
+                              Column {
+                                  Text("HASIL PROFIT", fontSize = 11.sp, color = statusColor, fontWeight = FontWeight.Bold)
+                                  Text(
+                                      ProfitEngine.formatRupiah(result.netProfit),
+                                      fontSize = 22.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = statusColor
+                                  )
+                              }
+                              Surface(
+                                  color = statusColor,
+                                  shape = RoundedCornerShape(8.dp)
+                              ) {
+                                  Text(
+                                      result.status,
+                                      color = Color.White,
+                                      modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                      fontWeight = FontWeight.Bold,
+                                      fontSize = 12.sp
+                                  )
+                              }
+                          }
+
+                          Spacer(Modifier.height(10.dp))
+                          Divider(color = statusColor.copy(alpha = 0.2f))
+                          Spacer(Modifier.height(10.dp))
+
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                              Text("Margin Profit:", fontSize = 13.sp, color = Color(0xFF334155))
+                              Text("${result.marginPercent}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                          }
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                              Text("Potongan Affiliate (${affPercent}%):", fontSize = 13.sp, color = Color(0xFF334155))
+                              Text(ProfitEngine.formatRupiah(result.affiliateNominal), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                          }
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                              Text("BEP ROAS Minimum:", fontSize = 13.sp, color = Color(0xFF334155))
+                              Text("${result.bepRoas}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                          }
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                              Text("Batas Aman Iklan (Max Ads):", fontSize = 13.sp, color = Color(0xFF334155))
+                              Text(ProfitEngine.formatRupiah(result.maxAdsLimit), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                          }
+                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                              Text("Batas Aman Komisi Affiliate:", fontSize = 13.sp, color = Color(0xFF334155))
+                              Text("${result.maxAffiliatePercentLimit}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                          }
+                      }
+                  }
+
+                  Spacer(Modifier.height(18.dp))
+
+                  Button(
+                      onClick = {
+                          if (name.isBlank() || price <= 0.0) {
+                              Toast.makeText(context, "Harap isi nama produk dan harga jual!", Toast.LENGTH_SHORT).show()
+                          } else {
+                              onSaveProduct(
+                                  ProductItem(
+                                      name = name.trim(),
+                                      sellingPrice = price,
+                                      cogs = cogs,
+                                      marketplaceFeePercent = fee,
+                                      fixedFee = fixed,
+                                      packagingCost = packing,
+                                      operationalCost = ops,
+                                      returnReservePercent = retur,
+                                      targetAds = ads,
+                                      targetAffiliatePercent = affPercent
+                                  )
+                              )
+                              Toast.makeText(context, "Produk berhasil disimpan!", Toast.LENGTH_SHORT).show()
+                          }
+                      },
+                      modifier = Modifier
+                          .fillMaxWidth()
+                          .height(50.dp),
+                      colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B)),
+                      shape = RoundedCornerShape(10.dp)
+                  ) {
+                      Text("Simpan Produk", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                  }
+
+                  // PADDING BAWAH LEGA SUPAYA TIDAK BERTUBRUKAN DENGAN NAVBAR
+                  Spacer(Modifier.height(130.dp))
+              }
+          }
+
+          // 3. SCREEN SIMULASI (AFFILIATE % & REAKTIVITAS INSTAN)
+          @Composable
+          fun SimulasiScreen(
+              products: List<ProductItem>,
+              targetMargin: Double
+          ) {
+              var selectedProductIndex by remember { mutableIntStateOf(0) }
+              var isDropdownExpanded by remember { mutableStateOf(false) }
+
+              val baseProduct = products.getOrNull(selectedProductIndex)
+
+              var simPriceText by remember(baseProduct) { mutableStateOf(baseProduct?.sellingPrice?.toLong()?.toString() ?: "0") }
+              var simFeeText by remember(baseProduct) { mutableStateOf(baseProduct?.marketplaceFeePercent?.toString() ?: "0") }
+              var simFixedText by remember(baseProduct) { mutableStateOf(baseProduct?.fixedFee?.toLong()?.toString() ?: "0") }
+              var simAdsText by remember(baseProduct) { mutableStateOf(baseProduct?.targetAds?.toLong()?.toString() ?: "0") }
+              var simAffPercentText by remember(baseProduct) { mutableStateOf(baseProduct?.targetAffiliatePercent?.toString() ?: "0") }
+
+              val beforeResult = remember(baseProduct, targetMargin) {
+                  baseProduct?.let {
+                      ProfitEngine.calculate(
+                          it.sellingPrice, it.cogs, it.marketplaceFeePercent,
+                          it.fixedFee, it.packagingCost, it.operationalCost,
+                          it.returnReservePercent, it.targetAds, it.targetAffiliatePercent, targetMargin
+                      )
+                  }
+              }
+
+              val afterResult by remember(baseProduct, simPriceText, simFeeText, simFixedText, simAdsText, simAffPercentText, targetMargin) {
+                  derivedStateOf {
+                      baseProduct?.let {
+                          val p = simPriceText.toDoubleOrNull() ?: 0.0
+                          val f = simFeeText.toDoubleOrNull() ?: 0.0
+                          val fx = simFixedText.toDoubleOrNull() ?: 0.0
+                          val a = simAdsText.toDoubleOrNull() ?: 0.0
+                          val af = simAffPercentText.toDoubleOrNull() ?: 0.0
+                          ProfitEngine.calculate(
+                              sellingPrice = p,
+                              cogs = it.cogs,
+                              marketplaceFeePercent = f,
+                              fixedFee = fx,
+                              packagingCost = it.packagingCost,
+                              operationalCost = it.operationalCost,
+                              returnReservePercent = it.returnReservePercent,
+                              targetAds = a,
+                              targetAffiliatePercent = af,
+                              targetMarginDefault = targetMargin
+                          )
+                      }
+                  }
+              }
+
+              Column(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .verticalScroll(rememberScrollState())
+                      .padding(16.dp)
+              ) {
+                  Text(
+                      text = "Simulator Fee & Biaya",
+                      fontSize = 20.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF1E293B)
+                  )
+                  Text(
+                      text = "Pilih produk untuk menguji skenario perubahan harga atau admin.",
+                      fontSize = 13.sp,
+                      color = Color(0xFF64748B)
+                  )
+                  Spacer(Modifier.height(14.dp))
+
+                  if (products.isEmpty()) {
+                      Card(
+                          modifier = Modifier.fillMaxWidth(),
+                          colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0))
+                      ) {
+                          Text(
+                              "Belum ada produk tersimpan. Silakan input produk terlebih dahulu di menu Hitung.",
+                              modifier = Modifier.padding(16.dp),
+                              color = Color(0xFFE65100)
+                          )
+                      }
+                  } else {
+                      Box(modifier = Modifier.fillMaxWidth()) {
+                          OutlinedButton(
+                              onClick = { isDropdownExpanded = true },
+                              modifier = Modifier.fillMaxWidth(),
+                              shape = RoundedCornerShape(8.dp)
+                          ) {
+                              Text("Target: ${baseProduct?.name ?: "-"}", color = Color(0xFF006D5B), fontWeight = FontWeight.Bold)
+                          }
+                          DropdownMenu(
+                              expanded = isDropdownExpanded,
+                              onDismissRequest = { isDropdownExpanded = false }
+                          ) {
+                              products.forEachIndexed { idx, p ->
+                                  DropdownMenuItem(
+                                      text = { Text(p.name) },
+                                      onClick = {
+                                          selectedProductIndex = idx
+                                          isDropdownExpanded = false
+                                      }
+                                  )
+                              }
+                          }
+                      }
+
+                      Spacer(Modifier.height(12.dp))
+
+                      OutlinedTextField(
+                          value = simPriceText,
+                          onValueChange = { simPriceText = it },
                           label = { Text("Harga Simulasi (Rp)") },
                           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                           modifier = Modifier.fillMaxWidth()
                       )
-                  }
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                      Spacer(Modifier.height(8.dp))
+
+                      Row(modifier = Modifier.fillMaxWidth()) {
                           OutlinedTextField(
-                              value = simFeePct,
-                              onValueChange = { simFeePct = it },
+                              value = simFeeText,
+                              onValueChange = { simFeeText = it },
                               label = { Text("Fee (%)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                              modifier = Modifier.weight(1f).padding(end = 4.dp)
                           )
                           OutlinedTextField(
-                              value = simFixedFee,
-                              onValueChange = { simFixedFee = it },
+                              value = simFixedText,
+                              onValueChange = { simFixedText = it },
                               label = { Text("Fixed Fee (Rp)") },
                               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
+                              modifier = Modifier.weight(1f).padding(start = 4.dp)
                           )
                       }
-                  }
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+                      Spacer(Modifier.height(8.dp))
+
+                      Row(modifier = Modifier.fillMaxWidth()) {
                           OutlinedTextField(
-                              value = simAds,
-                              onValueChange = { simAds = it },
+                              value = simAdsText,
+                              onValueChange = { simAdsText = it },
                               label = { Text("Iklan (Rp)") },
                               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
+                              modifier = Modifier.weight(1f).padding(end = 4.dp)
                           )
                           OutlinedTextField(
-                              value = simAff,
-                              onValueChange = { simAff = it },
-                              label = { Text("Affiliate (Rp)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f)
+                              value = simAffPercentText,
+                              onValueChange = { simAffPercentText = it },
+                              label = { Text("Affiliate (%)") },
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                              modifier = Modifier.weight(1f).padding(start = 4.dp)
                           )
                       }
-                  }
 
-                  item {
-                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                      Spacer(Modifier.height(16.dp))
+
+                      // KOMPARASI SEBELUM VS SESUDAH
+                      Row(modifier = Modifier.fillMaxWidth()) {
                           Card(
-                              modifier = Modifier.weight(1f),
-                              colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F4F6)),
+                              modifier = Modifier.weight(1f).padding(end = 4.dp),
+                              colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
                               shape = RoundedCornerShape(12.dp)
                           ) {
                               Column(modifier = Modifier.padding(12.dp)) {
-                                  Text("SEBELUM", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Gray)
-                                  val net = beforeResult?.netProfit ?: BigDecimal.ZERO
-                                  Text(formatRupiah(net), fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                  Text("Margin: ${beforeResult?.netProfitMarginPercent ?: "0"}%", fontSize = 12.sp)
-                                  Text("Status: ${beforeResult?.status ?: "-"}", fontSize = 12.sp)
+                                  Text("SEBELUM", fontSize = 11.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
+                                  Spacer(Modifier.height(4.dp))
+                                  Text(
+                                      beforeResult?.let { ProfitEngine.formatRupiah(it.netProfit) } ?: "-",
+                                      fontWeight = FontWeight.Bold,
+                                      fontSize = 15.sp
+                                  )
+                                  Text("Margin: ${beforeResult?.marginPercent ?: 0}%", fontSize = 12.sp, color = Color(0xFF64748B))
+                                  Text("Status: ${beforeResult?.status ?: "-"}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                               }
                           }
+
                           Card(
-                              modifier = Modifier.weight(1f),
-                              colors = CardDefaults.cardColors(containerColor = Color(0xFFEBF3FB)),
+                              modifier = Modifier.weight(1f).padding(start = 4.dp),
+                              colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
                               shape = RoundedCornerShape(12.dp)
                           ) {
                               Column(modifier = Modifier.padding(12.dp)) {
-                                  Text("SESUDAH", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1565C0))
-                                  Text(formatRupiah(afterResult.netProfit), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Color(0xFF0D47A1))
-                                  Text("Margin: ${afterResult.netProfitMarginPercent}%", fontSize = 12.sp)
-                                  Text("Status: ${afterResult.status}", fontSize = 12.sp)
+                                  Text("SESUDAH", fontSize = 11.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
+                                  Spacer(Modifier.height(4.dp))
+                                  Text(
+                                      afterResult?.let { ProfitEngine.formatRupiah(it.netProfit) } ?: "-",
+                                      fontWeight = FontWeight.Bold,
+                                      fontSize = 15.sp,
+                                      color = Color(0xFF1B5E20)
+                                  )
+                                  Text("Margin: ${afterResult?.marginPercent ?: 0}%", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                                  Text("Status: ${afterResult?.status ?: "-"}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1B5E20))
                               }
                           }
                       }
-                  }
 
-                  item {
-                      val diff = afterResult.netProfit.subtract(beforeResult?.netProfit ?: afterResult.netProfit)
-                      val isPositive = diff.compareTo(BigDecimal.ZERO) >= 0
+                      Spacer(Modifier.height(14.dp))
+
+                      // DAMPAK PERUBAHAN
+                      val diffProfit = if (beforeResult != null && afterResult != null) {
+                          afterResult!!.netProfit.subtract(beforeResult.netProfit)
+                      } else {
+                          BigDecimal.ZERO
+                      }
+
                       Card(
                           modifier = Modifier.fillMaxWidth(),
-                          colors = CardDefaults.cardColors(containerColor = if (isPositive) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)),
+                          colors = CardDefaults.cardColors(
+                              containerColor = if (diffProfit >= BigDecimal.ZERO) Color(0xFFE8F5E9) else Color(0xFFFFEBEE)
+                          ),
                           shape = RoundedCornerShape(12.dp)
                       ) {
                           Column(modifier = Modifier.padding(14.dp)) {
-                              Text("DAMPAK PERUBAHAN", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                              Text("DAMPAK PERUBAHAN", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                              Spacer(Modifier.height(4.dp))
+                              val sign = if (diffProfit > BigDecimal.ZERO) "+" else ""
                               Text(
-                                  "Selisih Net Profit: " + (if (isPositive) "+" else "") + formatRupiah(diff),
-                                  fontWeight = FontWeight.ExtraBold,
-                                  fontSize = 18.sp,
-                                  color = if (isPositive) Color(0xFF2E7D32) else Color(0xFFC62828)
+                                  "Selisih Net Profit: $sign${ProfitEngine.formatRupiah(diffProfit)}",
+                                  fontSize = 16.sp,
+                                  fontWeight = FontWeight.Bold,
+                                  color = if (diffProfit >= BigDecimal.ZERO) Color(0xFF2E7D32) else Color(0xFFC62828)
                               )
                           }
                       }
                   }
-                  item { Spacer(modifier = Modifier.height(100.dp)) }
-              }
 
-              if (showProductPicker) {
-                  AlertDialog(
-                      onDismissRequest = { showProductPicker = false },
-                      title = { Text("Pilih Produk Target") },
-                      text = {
-                          LazyColumn {
-                              items(products) { prod ->
-                                  ListItem(
-                                      headlineContent = { Text(prod.name) },
-                                      modifier = Modifier.clickable {
-                                          selectedProduct = prod
-                                          showProductPicker = false
-                                      }
-                                  )
-                              }
-                          }
-                      },
-                      confirmButton = {},
-                      dismissButton = {
-                          TextButton(onClick = { showProductPicker = false }) {
-                              Text("Batal")
-                          }
-                      }
-                  )
+                  Spacer(Modifier.height(130.dp))
               }
           }
 
+          // 4. SCREEN PRODUK
           @Composable
-          fun ProductListScreen(products: List<ProductInput>, onDelete: (ProductInput) -> Unit) {
+          fun ProdukScreen(
+              products: List<ProductItem>,
+              targetMargin: Double,
+              onDeleteProduct: (String) -> Unit
+          ) {
               var selectedFilter by remember { mutableStateOf("SEMUA") }
 
-              val filteredList = remember(products, selectedFilter) {
-                  if (selectedFilter == "SEMUA") products
-                  else products.filter {
-                      val res = ProfitEngine.calculate(it)
-                      res.status == selectedFilter
+              val calculatedList = remember(products, targetMargin) {
+                  products.map { p ->
+                      p to ProfitEngine.calculate(
+                          p.sellingPrice, p.cogs, p.marketplaceFeePercent,
+                          p.fixedFee, p.packagingCost, p.operationalCost,
+                          p.returnReservePercent, p.targetAds, p.targetAffiliatePercent, targetMargin
+                      )
                   }
               }
 
-              Column(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-                  Text("Daftar Produk (${filteredList.size})", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-                  Spacer(modifier = Modifier.height(8.dp))
+              val filteredList = calculatedList.filter { pair ->
+                  when (selectedFilter) {
+                      "SEHAT" -> pair.second.status == "SEHAT"
+                      "TIPIS" -> pair.second.status == "TIPIS"
+                      "BONCOS" -> pair.second.status == "BONCOS"
+                      else -> true
+                  }
+              }
 
-                  Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+              Column(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .padding(16.dp)
+              ) {
+                  Text(
+                      text = "Daftar Produk (${products.size})",
+                      fontSize = 20.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF1E293B)
+                  )
+                  Spacer(Modifier.height(12.dp))
+
+                  Row(modifier = Modifier.fillMaxWidth()) {
                       listOf("SEMUA", "SEHAT", "TIPIS", "BONCOS").forEach { filter ->
+                          val isSelected = selectedFilter == filter
                           Button(
                               onClick = { selectedFilter = filter },
+                              modifier = Modifier
+                                  .weight(1f)
+                                  .padding(horizontal = 2.dp)
+                                  .height(36.dp),
                               colors = ButtonDefaults.buttonColors(
-                                  containerColor = if (selectedFilter == filter) Color(0xFF006A60) else Color(0xFFE0E0E0),
-                                  contentColor = if (selectedFilter == filter) Color.White else Color.Black
+                                  containerColor = if (isSelected) Color(0xFF006D5B) else Color(0xFFE2E8F0)
                               ),
-                              contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                              shape = RoundedCornerShape(16.dp)
+                              contentPadding = PaddingValues(0.dp)
                           ) {
-                              Text(filter, fontSize = 11.sp)
+                              Text(
+                                  filter,
+                                  fontSize = 11.sp,
+                                  fontWeight = FontWeight.Bold,
+                                  color = if (isSelected) Color.White else Color(0xFF475569)
+                              )
                           }
                       }
                   }
-                  Spacer(modifier = Modifier.height(10.dp))
+
+                  Spacer(Modifier.height(12.dp))
 
                   if (filteredList.isEmpty()) {
-                      Box(modifier = Modifier.fillMaxSize().weight(1f), contentAlignment = Alignment.Center) {
-                          Text("Tidak ada produk dalam kategori ini.", color = Color.Gray)
+                      Box(
+                          modifier = Modifier.fillMaxSize(),
+                          contentAlignment = Alignment.Center
+                      ) {
+                          Text("Tidak ada produk dalam kategori ini.", color = Color(0xFF94A3B8))
                       }
                   } else {
-                      LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                          items(filteredList) { prod ->
-                              val res = ProfitEngine.calculate(prod)
+                      LazyColumn(
+                          modifier = Modifier.fillMaxSize(),
+                          contentPadding = PaddingValues(bottom = 120.dp)
+                      ) {
+                          items(filteredList, key = { it.first.id }) { (product, calc) ->
+                              val (badgeBg, badgeText) = when (calc.status) {
+                                  "SEHAT" -> Color(0xFF2E7D32) to "SEHAT"
+                                  "TIPIS" -> Color(0xFFE65100) to "TIPIS"
+                                  else -> Color(0xFFC62828) to "BONCOS"
+                              }
+
                               Card(
-                                  modifier = Modifier.fillMaxWidth(),
+                                  modifier = Modifier
+                                      .fillMaxWidth()
+                                      .padding(vertical = 6.dp),
                                   colors = CardDefaults.cardColors(containerColor = Color.White),
-                                  elevation = CardDefaults.cardElevation(2.dp),
+                                  elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                                   shape = RoundedCornerShape(12.dp)
                               ) {
                                   Column(modifier = Modifier.padding(14.dp)) {
-                                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                          Text(prod.name, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                      Row(
+                                          modifier = Modifier.fillMaxWidth(),
+                                          horizontalArrangement = Arrangement.SpaceBetween,
+                                          verticalAlignment = Alignment.CenterVertically
+                                      ) {
+                                          Text(
+                                              product.name.replaceFirstChar { it.uppercase() },
+                                              fontSize = 16.sp,
+                                              fontWeight = FontWeight.Bold
+                                          )
                                           Surface(
-                                              color = when (res.status) {
-                                                  "SEHAT" -> Color(0xFF2E7D32)
-                                                  "TIPIS" -> Color(0xFFF57F17)
-                                                  else -> Color(0xFFC62828)
-                                              },
-                                              shape = RoundedCornerShape(12.dp)
+                                              color = badgeBg,
+                                              shape = RoundedCornerShape(6.dp)
                                           ) {
-                                              Text(res.status, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))
+                                              Text(
+                                                  badgeText,
+                                                  color = Color.White,
+                                                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                                  fontWeight = FontWeight.Bold,
+                                                  fontSize = 11.sp
+                                              )
                                           }
                                       }
-                                      Spacer(modifier = Modifier.height(4.dp))
-                                      Text("Harga: ${formatRupiah(prod.sellingPrice)} | Margin: ${res.netProfitMarginPercent}%", fontSize = 13.sp, color = Color.Gray)
-                                      Text("Net Profit: ${formatRupiah(res.netProfit)}", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = if (res.status == "BONCOS") Color.Red else Color(0xFF2E7D32))
+
+                                      Spacer(Modifier.height(4.dp))
+                                      Text(
+                                          "Harga: ${ProfitEngine.formatRupiah(product.sellingPrice)} | Margin: ${calc.marginPercent}%",
+                                          fontSize = 13.sp,
+                                          color = Color(0xFF64748B)
+                                      )
+                                      Spacer(Modifier.height(2.dp))
+                                      Text(
+                                          "Net Profit: ${ProfitEngine.formatRupiah(calc.netProfit)}",
+                                          fontSize = 14.sp,
+                                          fontWeight = FontWeight.Bold,
+                                          color = if (calc.netProfit >= BigDecimal.ZERO) Color(0xFF2E7D32) else Color(0xFFC62828)
+                                      )
+
+                                      Spacer(Modifier.height(6.dp))
                                       Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                          TextButton(onClick = { onDelete(prod) }) {
-                                              Text("Hapus", color = Color.Red, fontSize = 12.sp)
-                                          }
+                                          Text(
+                                              "Hapus",
+                                              color = Color(0xFFC62828),
+                                              fontSize = 12.sp,
+                                              fontWeight = FontWeight.Bold,
+                                              modifier = Modifier
+                                                  .clickable { onDeleteProduct(product.id) }
+                                                  .padding(4.dp)
+                                          )
                                       }
                                   }
                               }
                           }
-                          item { Spacer(modifier = Modifier.height(80.dp)) }
                       }
                   }
               }
           }
 
+          // 5. SCREEN SETTING (FIX EDIT TARGET MARGIN)
           @Composable
-          fun SettingsScreen(repo: ProfitRepository, onReload: () -> Unit) {
+          fun SettingScreen(
+              targetMargin: Double,
+              onSaveTargetMargin: (Double) -> Unit,
+              repository: ProfitRepository,
+              onDataRestored: () -> Unit
+          ) {
+              var targetInput by remember(targetMargin) { mutableStateOf(targetMargin.toString()) }
+              var showBackupDialog by remember { mutableStateOf(false) }
+              var backupJsonText by remember { mutableStateOf("") }
+              val clipboardManager = LocalClipboardManager.current
               val context = LocalContext.current
-              var jsonText by remember { mutableStateOf(repo.exportJson()) }
-              var showDialog by remember { mutableStateOf(false) }
 
-              Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                  Text("Pengaturan", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+              Column(
+                  modifier = Modifier
+                      .fillMaxSize()
+                      .verticalScroll(rememberScrollState())
+                      .padding(16.dp)
+              ) {
+                  Text(
+                      text = "Pengaturan",
+                      fontSize = 20.sp,
+                      fontWeight = FontWeight.Bold,
+                      color = Color(0xFF1E293B)
+                  )
+                  Spacer(Modifier.height(16.dp))
 
-                  Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                      Column(modifier = Modifier.padding(14.dp)) {
-                          Text("Target Margin Default (%)", fontWeight = FontWeight.Bold)
-                          Spacer(modifier = Modifier.height(6.dp))
-                          OutlinedTextField(value = "20.0", onValueChange = {}, modifier = Modifier.fillMaxWidth())
-                          Spacer(modifier = Modifier.height(8.dp))
-                          Button(onClick = {
-                              Toast.makeText(context, "Target margin tersimpan!", Toast.LENGTH_SHORT).show()
-                          }, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006A60))) {
+                  Card(
+                      modifier = Modifier.fillMaxWidth(),
+                      colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                      shape = RoundedCornerShape(12.dp)
+                  ) {
+                      Column(modifier = Modifier.padding(16.dp)) {
+                          Text(
+                              "Target Margin Default (%)",
+                              fontWeight = FontWeight.SemiBold,
+                              fontSize = 14.sp,
+                              color = Color(0xFF334155)
+                          )
+                          Spacer(Modifier.height(8.dp))
+                          OutlinedTextField(
+                              value = targetInput,
+                              onValueChange = { targetInput = it },
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                              modifier = Modifier.fillMaxWidth(),
+                              singleLine = true
+                          )
+                          Spacer(Modifier.height(12.dp))
+                          Button(
+                              onClick = {
+                                  val parsed = targetInput.toDoubleOrNull()
+                                  if (parsed != null && parsed >= 0.0) {
+                                      onSaveTargetMargin(parsed)
+                                      Toast.makeText(context, "Target margin disimpan!", Toast.LENGTH_SHORT).show()
+                                  } else {
+                                      Toast.makeText(context, "Masukkan angka margin yang valid!", Toast.LENGTH_SHORT).show()
+                                  }
+                              },
+                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B)),
+                              shape = RoundedCornerShape(8.dp)
+                          ) {
                               Text("Simpan Target")
                           }
                       }
                   }
 
-                  Card(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) {
-                      Column(modifier = Modifier.padding(14.dp)) {
-                          Text("Backup & Restore (Offline)", fontWeight = FontWeight.Bold)
-                          Spacer(modifier = Modifier.height(8.dp))
-                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                  Spacer(Modifier.height(16.dp))
+
+                  Card(
+                      modifier = Modifier.fillMaxWidth(),
+                      colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                      shape = RoundedCornerShape(12.dp)
+                  ) {
+                      Column(modifier = Modifier.padding(16.dp)) {
+                          Text(
+                              "Backup & Restore (Offline)",
+                              fontWeight = FontWeight.SemiBold,
+                              fontSize = 14.sp,
+                              color = Color(0xFF334155)
+                          )
+                          Spacer(Modifier.height(12.dp))
+                          Row(modifier = Modifier.fillMaxWidth()) {
                               Button(
                                   onClick = {
-                                      jsonText = repo.exportJson()
-                                      showDialog = true
+                                      backupJsonText = repository.getRawJson()
+                                      showBackupDialog = true
                                   },
-                                  modifier = Modifier.weight(1f),
-                                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006A60))
+                                  modifier = Modifier
+                                      .weight(1f)
+                                      .padding(end = 4.dp),
+                                  colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B)),
+                                  shape = RoundedCornerShape(8.dp)
                               ) {
-                                  Text("Backup Data")
+                                  Text("Backup Data", fontSize = 13.sp)
                               }
                               OutlinedButton(
                                   onClick = {
-                                      jsonText = ""
-                                      showDialog = true
+                                      backupJsonText = ""
+                                      showBackupDialog = true
                                   },
-                                  modifier = Modifier.weight(1f)
+                                  modifier = Modifier
+                                      .weight(1f)
+                                      .padding(start = 4.dp),
+                                  shape = RoundedCornerShape(8.dp)
                               ) {
-                                  Text("Restore Data")
+                                  Text("Restore Data", fontSize = 13.sp, color = Color(0xFF006D5B))
                               }
                           }
                       }
                   }
 
-                  Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F4F6)), shape = RoundedCornerShape(12.dp)) {
-                      Column(modifier = Modifier.padding(14.dp)) {
-                          Text("Profit Control V1.0.0", fontWeight = FontWeight.Bold)
-                          Text("Semua data tersimpan otomatis di memori internal HP Anda secara offline. Data tidak akan hilang saat aplikasi ditutup.", fontSize = 12.sp, color = Color.Gray)
+                  Spacer(Modifier.height(16.dp))
+
+                  Card(
+                      modifier = Modifier.fillMaxWidth(),
+                      colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                      shape = RoundedCornerShape(12.dp)
+                  ) {
+                      Column(modifier = Modifier.padding(16.dp)) {
+                          Text(
+                              "Profit Control V1.0.2",
+                              fontWeight = FontWeight.Bold,
+                              fontSize = 14.sp,
+                              color = Color(0xFF1E293B)
+                          )
+                          Spacer(Modifier.height(4.dp))
+                          Text(
+                              "Semua data tersimpan otomatis di memori internal HP Anda secara offline. Data tidak akan hilang saat aplikasi ditutup.",
+                              fontSize = 12.sp,
+                              color = Color(0xFF64748B),
+                              lineHeight = 16.sp
+                          )
                       }
                   }
+
+                  Spacer(Modifier.height(120.dp))
               }
 
-              if (showDialog) {
+              if (showBackupDialog) {
                   AlertDialog(
-                      onDismissRequest = { showDialog = false },
+                      onDismissRequest = { showBackupDialog = false },
                       title = { Text("Backup / Restore Data") },
                       text = {
                           Column {
-                              Text("Salin teks di bawah untuk cadangan, atau tempel teks JSON lama untuk memulihkan data:", fontSize = 12.sp)
-                              Spacer(modifier = Modifier.height(8.dp))
-                              OutlinedTextField(
-                                  value = jsonText,
-                                  onValueChange = { jsonText = it },
-                                  modifier = Modifier.fillMaxWidth().height(150.dp)
+                              Text(
+                                  "Salin teks di bawah untuk cadangan, atau tempel teks JSON lama untuk memulihkan data:",
+                                  fontSize = 12.sp,
+                                  color = Color(0xFF64748B)
                               )
+                              Spacer(Modifier.height(8.dp))
+                              OutlinedTextField(
+                                  value = backupJsonText,
+                                  onValueChange = { backupJsonText = it },
+                                  modifier = Modifier
+                                      .fillMaxWidth()
+                                      .height(150.dp),
+                                  textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
+                              )
+                              Spacer(Modifier.height(6.dp))
+                              Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                                  TextButton(onClick = {
+                                      clipboardManager.setText(AnnotatedString(backupJsonText))
+                                      Toast.makeText(context, "Teks disalin ke clipboard!", Toast.LENGTH_SHORT).show()
+                                  }) {
+                                      Text("Salin Teks", fontSize = 12.sp)
+                                  }
+                              }
                           }
                       },
                       confirmButton = {
-                          Button(onClick = {
-                              if (jsonText.isNotEmpty() && repo.importJson(jsonText)) {
-                                  Toast.makeText(context, "Data berhasil dipulihkan!", Toast.LENGTH_SHORT).show()
-                                  onReload()
-                                  showDialog = false
-                              } else {
-                                  Toast.makeText(context, "Format data tidak valid!", Toast.LENGTH_SHORT).show()
-                              }
-                          }) {
+                          Button(
+                              onClick = {
+                                  if (backupJsonText.isNotBlank()) {
+                                      val ok = repository.restoreRawJson(backupJsonText)
+                                      if (ok) {
+                                          onDataRestored()
+                                          Toast.makeText(context, "Data berhasil dipulihkan!", Toast.LENGTH_SHORT).show()
+                                          showBackupDialog = false
+                                      } else {
+                                          Toast.makeText(context, "Format JSON tidak valid!", Toast.LENGTH_SHORT).show()
+                                      }
+                                  }
+                              },
+                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B))
+                          ) {
                               Text("Terapkan")
                           }
                       },
                       dismissButton = {
-                          TextButton(onClick = { showDialog = false }) {
+                          TextButton(onClick = { showBackupDialog = false }) {
                               Text("Tutup")
                           }
                       }
@@ -1085,20 +1535,13 @@ jobs:
           }
           EOF
 
-      - name: Build Debug APK & Capture Diagnostics
+      - name: Build Android Debug APK
         run: |
-          # Eksekusi compile dengan penangkap log otomatis
-          gradle assembleDebug --no-daemon --stacktrace 2>&1 | tee build_log.txt || {
-            echo "### ❌ Build APK Gagal - Detail Log Utama" >> $GITHUB_STEP_SUMMARY
-            echo '```text' >> $GITHUB_STEP_SUMMARY
-            grep -B 3 -A 25 "FAILURE: Build failed" build_log.txt >> $GITHUB_STEP_SUMMARY || tail -n 50 build_log.txt >> $GITHUB_STEP_SUMMARY
-            echo '```' >> $GITHUB_STEP_SUMMARY
-            exit 1
-          }
+          chmod +x gradlew || true
+          gradle assembleDebug --stacktrace
 
-      - name: Upload Debug APK Artifact
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ProfitControl-V1-Final
+          name: ProfitControl-V1.0.2-AffiliatePercent
           path: app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
