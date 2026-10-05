@@ -28,8 +28,10 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      - name: Generate Android Project Structure & Icons
+      - name: Clean and Generate Android Project Structure
         run: |
+          rm -rf app/src/main/res/drawable/*
+          rm -rf app/src/main/res/mipmap-anydpi-v26/*
           mkdir -p app/src/main/java/com/profitcontrol/app
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
@@ -134,7 +136,7 @@ jobs:
           }
           EOF
 
-          # BACKGROUND VECTOR HIJAU EMERALD
+          # BACKGROUND VECTOR SOLID EMERALD
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_background.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -147,7 +149,7 @@ jobs:
           </vector>
           EOF
 
-          # FOREGROUND GRAFIK FINANSIAL (PUTIH + PANAH MINT)
+          # FOREGROUND VECTOR CHART & ARROW
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_foreground.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
@@ -226,7 +228,11 @@ jobs:
           import androidx.compose.foundation.text.KeyboardOptions
           import androidx.compose.foundation.verticalScroll
           import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.*
+          import androidx.compose.material.icons.filled.Add
+          import androidx.compose.material.icons.filled.Home
+          import androidx.compose.material.icons.filled.List
+          import androidx.compose.material.icons.filled.PlayArrow
+          import androidx.compose.material.icons.filled.Settings
           import androidx.compose.material3.*
           import androidx.compose.runtime.*
           import androidx.compose.ui.Alignment
@@ -474,8 +480,8 @@ jobs:
 
           enum class NavTab(val title: String, val icon: @Composable () -> Unit) {
               HOME("Home", { Icon(Icons.Default.Home, contentDescription = "Home") }),
-              HITUNG("Hitung", { Icon(Icons.Default.AddCircle, contentDescription = "Hitung") }),
-              SIMULASI("Simulasi", { Icon(Icons.Default.CheckCircle, contentDescription = "Simulasi") }),
+              HITUNG("Hitung", { Icon(Icons.Default.Add, contentDescription = "Hitung") }),
+              SIMULASI("Simulasi", { Icon(Icons.Default.PlayArrow, contentDescription = "Simulasi") }),
               PRODUK("Produk", { Icon(Icons.Default.List, contentDescription = "Produk") }),
               SETTING("Setting", { Icon(Icons.Default.Settings, contentDescription = "Setting") })
           }
@@ -512,7 +518,7 @@ jobs:
                           containerColor = Color.White,
                           tonalElevation = 6.dp
                       ) {
-                          NavTab.values().forEach { tab ->
+                          NavTab.entries.forEach { tab ->
                               NavigationBarItem(
                                   selected = currentTab == tab,
                                   onClick = { currentTab = tab },
@@ -962,7 +968,12 @@ jobs:
                               }
 
                               Spacer(Modifier.height(10.dp))
-                              Divider(color = statusColor.copy(alpha = 0.2f))
+                              Box(
+                                  modifier = Modifier
+                                      .fillMaxWidth()
+                                      .height(1.dp)
+                                      .background(statusColor.copy(alpha = 0.2f))
+                              )
                               Spacer(Modifier.height(10.dp))
 
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1530,9 +1541,9 @@ jobs:
               val clipboardManager = LocalClipboardManager.current
               val context = LocalContext.current
 
-              var expandedQ1 by remember { mutableStateOf(false) }
-              var expandedQ2 by remember { mutableStateOf(false) }
-              var expandedQ3 by remember { mutableStateOf(false) }
+              var openQ1 by remember { mutableStateOf(false) }
+              var openQ2 by remember { mutableStateOf(false) }
+              var openQ3 by remember { mutableStateOf(false) }
 
               Column(
                   modifier = Modifier
@@ -1548,6 +1559,7 @@ jobs:
                   )
                   Spacer(Modifier.height(16.dp))
 
+                  // PANDUAN RINGKAS 3 LANGKAH
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
@@ -1571,6 +1583,7 @@ jobs:
 
                   Spacer(Modifier.height(14.dp))
 
+                  // Q&A MANDIRI (TANPA ANIMASI & MENGGUNAKAN BOX PEMBATAS UNIVERSAL)
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
@@ -1585,44 +1598,51 @@ jobs:
                           )
                           Spacer(Modifier.height(10.dp))
 
-                          Column(modifier = Modifier.fillMaxWidth().clickable { expandedQ1 = !expandedQ1 }) {
+                          // Q1
+                          Column(modifier = Modifier.fillMaxWidth().clickable { openQ1 = !openQ1 }) {
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                   Text("Apa itu BEP ROAS Minimum?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                                  Text(if (expandedQ1) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
+                                  Text(if (openQ1) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
                               }
-                              if (expandedQ1) {
+                              if (openQ1) {
                                   Text(
-                                      "Nilai efektivitas balik modal iklan Anda. Jika BEP ROAS toko tertulis 3.0x, maka hasil iklan marketplace minimal harus 3.0x. Bila di bawah itu, iklan Anda sedang membakar uang rugi.",
+                                      "Nilai efektivitas balik modal iklan Anda. Jika BEP ROAS tertulis 3.0x, maka hasil iklan minimal harus 3.0x. Bila di bawah itu, iklan Anda sedang rugi.",
                                       fontSize = 12.sp,
                                       color = Color(0xFF475569),
                                       modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
                                   )
                               }
                           }
-                          Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFFE2E8F0))
+                          Spacer(Modifier.height(8.dp))
+                          Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE2E8F0)))
+                          Spacer(Modifier.height(8.dp))
 
-                          Column(modifier = Modifier.fillMaxWidth().clickable { expandedQ2 = !expandedQ2 }) {
+                          // Q2
+                          Column(modifier = Modifier.fillMaxWidth().clickable { openQ2 = !openQ2 }) {
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                   Text("Batas Aman Iklan (Max Ads)?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                                  Text(if (expandedQ2) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
+                                  Text(if (openQ2) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
                               }
-                              if (expandedQ2) {
+                              if (openQ2) {
                                   Text(
-                                      "Biaya iklan maksimal per order yang boleh dikeluarkan sebelum produk mengalami kerugian bersih.",
+                                      "Biaya iklan maksimal per pesanan yang boleh dikeluarkan sebelum produk mengalami kerugian bersih.",
                                       fontSize = 12.sp,
                                       color = Color(0xFF475569),
                                       modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
                                   )
                               }
                           }
-                          Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFFE2E8F0))
+                          Spacer(Modifier.height(8.dp))
+                          Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE2E8F0)))
+                          Spacer(Modifier.height(8.dp))
 
-                          Column(modifier = Modifier.fillMaxWidth().clickable { expandedQ3 = !expandedQ3 }) {
+                          // Q3
+                          Column(modifier = Modifier.fillMaxWidth().clickable { openQ3 = !openQ3 }) {
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                   Text("Apakah data aman & butuh internet?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                                  Text(if (expandedQ3) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
+                                  Text(if (openQ3) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
                               }
-                              if (expandedQ3) {
+                              if (openQ3) {
                                   Text(
                                       "Aplikasi 100% offline. Semua data tersimpan aman di HP Anda sendiri tanpa dikirim ke server luar manapun.",
                                       fontSize = 12.sp,
@@ -1636,6 +1656,7 @@ jobs:
 
                   Spacer(Modifier.height(14.dp))
 
+                  // TARGET MARGIN DEFAULT
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
@@ -1677,6 +1698,7 @@ jobs:
 
                   Spacer(Modifier.height(14.dp))
 
+                  // BACKUP & RESTORE
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
