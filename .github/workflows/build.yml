@@ -81,8 +81,8 @@ jobs:
                   applicationId = "com.profitcontrol.app"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 4
-                  versionName = "1.0.3"
+                  versionCode = 5
+                  versionName = "1.0.4"
 
                   testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                   vectorDrawables {
@@ -130,40 +130,66 @@ jobs:
               implementation("androidx.compose.ui:ui-tooling-preview")
               implementation("androidx.compose.material3:material3")
               implementation("androidx.compose.material:material-icons-core")
+              implementation("androidx.compose.material:material-icons-extended")
               implementation("com.google.code.gson:gson:2.10.1")
           }
           EOF
 
-          # BUAT ADAPTIVE ICON CUSTOM (PROFESIONAL FINANSIAL)
+          # BACKGROUND DENGAN GRADASI HALUS MODERN + AMBIENT HIGHLIGHT
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_background.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              xmlns:aapt="http://schemas.android.com/aapt"
               android:width="108dp"
               android:height="108dp"
               android:viewportWidth="108"
               android:viewportHeight="108">
               <path
-                  android:fillColor="#005B4C"
-                  android:pathData="M0,0h108v108h-108z"/>
+                  android:pathData="M0,0h108v108h-108z">
+                  <aapt:attr name="android:fillColor">
+                      <gradient
+                          android:startX="18"
+                          android:startY="12"
+                          android:endX="94"
+                          android:endY="98"
+                          android:type="linear">
+                          <item android:offset="0.0" android:color="#00897B"/>
+                          <item android:offset="0.55" android:color="#005B4C"/>
+                          <item android:offset="1.0" android:color="#00332B"/>
+                      </gradient>
+                  </aapt:attr>
+              </path>
+              <!-- Ambient Top Highlight Curves -->
+              <path
+                  android:pathData="M0,0 L108,0 L108,46 C68,36 32,24 0,46 Z"
+                  android:fillColor="#15FFFFFF" />
           </vector>
           EOF
 
+          # FOREGROUND GRAFIK DENGAN AKSEN GLOW & DROP SHADOW
           cat << 'EOF' > app/src/main/res/drawable/ic_launcher_foreground.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="108dp"
               android:height="108dp"
               android:viewportWidth="108"
               android:viewportHeight="108">
+              <!-- Shadow Layer -->
+              <path
+                  android:fillColor="#25002018"
+                  android:pathData="M35,72 L43,72 L43,56 L35,56 Z M49,72 L57,72 L57,46 L49,46 Z M63,72 L71,72 L71,38 L63,38 Z M31,78 L77,78 L77,74 L31,74 Z"/>
+              <!-- White Pillar Bars -->
               <path
                   android:fillColor="#FFFFFF"
                   android:pathData="M34,70 L42,70 L42,54 L34,54 Z M48,70 L56,70 L56,44 L48,44 Z M62,70 L70,70 L70,36 L62,36 Z M30,76 L76,76 L76,72 L30,72 Z"/>
+              <!-- Mint Upward Trend Line -->
               <path
                   android:strokeColor="#A7F3D0"
-                  android:strokeWidth="3.5"
+                  android:strokeWidth="4"
                   android:strokeLineCap="round"
                   android:pathData="M34,48 L48,36 L60,44 L74,30"/>
+              <!-- Trend Arrow Head -->
               <path
                   android:fillColor="#A7F3D0"
-                  android:pathData="M70,30 L76,30 L76,36 Z"/>
+                  android:pathData="M68,30 L76,30 L76,38 Z"/>
           </vector>
           EOF
 
@@ -205,7 +231,7 @@ jobs:
           </resources>
           EOF
 
-      - name: Inject Source Code with Edit Product & Sanitizer
+      - name: Inject Source Code with In-App Guide, Q&A, and Single Sample Product
         run: |
           cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
           package com.profitcontrol.app
@@ -215,6 +241,7 @@ jobs:
           import android.widget.Toast
           import androidx.activity.ComponentActivity
           import androidx.activity.compose.setContent
+          import androidx.compose.animation.AnimatedVisibility
           import androidx.compose.foundation.background
           import androidx.compose.foundation.clickable
           import androidx.compose.foundation.layout.*
@@ -272,7 +299,6 @@ jobs:
           )
 
           object ProfitEngine {
-              // Fungsi pembersih titik ribuan (misal "50.000" dibersihkan jadi 50000.0)
               fun parseNominal(text: String): Double {
                   val cleaned = text.replace(".", "").replace(",", "").trim()
                   return cleaned.toDoubleOrNull() ?: 0.0
@@ -357,7 +383,7 @@ jobs:
                       status = status,
                       bepRoas = bepRoas,
                       maxAdsLimit = maxAds,
-                      maxAffiliatePercentLimit = maxAffPercent,
+                      maxAffiliatePercentLimit = maxAffiliatePercent,
                       affiliateNominal = affiliateNominal
                   )
               }
@@ -386,13 +412,23 @@ jobs:
                   pref.edit().putFloat("target_margin", margin.toFloat()).apply()
               }
 
+              // HANYA 1 CONTOH PRODUK REALISTIS
               fun loadProducts(): List<ProductItem> {
                   return try {
                       if (!file.exists()) {
                           val sample = listOf(
-                              ProductItem(name = "Kemeja", sellingPrice = 95000.0, cogs = 50000.0, marketplaceFeePercent = 6.5, fixedFee = 1000.0, packagingCost = 2000.0, operationalCost = 1500.0, returnReservePercent = 2.0, targetAds = 5000.0, targetAffiliatePercent = 5.0),
-                              ProductItem(name = "Celana", sellingPrice = 90000.0, cogs = 60000.0, marketplaceFeePercent = 8.0, fixedFee = 2000.0, packagingCost = 2000.0, operationalCost = 1500.0, returnReservePercent = 2.0, targetAds = 5000.0, targetAffiliatePercent = 10.0),
-                              ProductItem(name = "Sepatu", sellingPrice = 100000.0, cogs = 80000.0, marketplaceFeePercent = 8.5, fixedFee = 1000.0, packagingCost = 2500.0, operationalCost = 1500.0, returnReservePercent = 2.0, targetAds = 5000.0, targetAffiliatePercent = 10.0)
+                              ProductItem(
+                                  name = "[CONTOH] Kaos Polos",
+                                  sellingPrice = 85000.0,
+                                  cogs = 45000.0,
+                                  marketplaceFeePercent = 6.5,
+                                  fixedFee = 1000.0,
+                                  packagingCost = 2000.0,
+                                  operationalCost = 1500.0,
+                                  returnReservePercent = 2.0,
+                                  targetAds = 5000.0,
+                                  targetAffiliatePercent = 5.0
+                              )
                           )
                           saveProducts(sample)
                           sample
@@ -740,7 +776,6 @@ jobs:
 
               val context = LocalContext.current
 
-              // Gunakan parser pembersih titik ribuan
               val price = ProfitEngine.parseNominal(priceText)
               val cogs = ProfitEngine.parseNominal(cogsText)
               val fee = ProfitEngine.parsePercent(feeText)
@@ -1415,7 +1450,6 @@ jobs:
                   }
               }
 
-              // DIALOG EDIT PRODUK
               editingProduct?.let { prod ->
                   var editName by remember { mutableStateOf(prod.name) }
                   var editPrice by remember { mutableStateOf(prod.sellingPrice.toLong().toString()) }
@@ -1523,6 +1557,10 @@ jobs:
               val clipboardManager = LocalClipboardManager.current
               val context = LocalContext.current
 
+              var expandedQ1 by remember { mutableStateOf(false) }
+              var expandedQ2 by remember { mutableStateOf(false) }
+              var expandedQ3 by remember { mutableStateOf(false) }
+
               Column(
                   modifier = Modifier
                       .fillMaxSize()
@@ -1530,13 +1568,107 @@ jobs:
                       .padding(16.dp)
               ) {
                   Text(
-                      text = "Pengaturan",
+                      text = "Pengaturan & Panduan",
                       fontSize = 20.sp,
                       fontWeight = FontWeight.Bold,
                       color = Color(0xFF1E293B)
                   )
                   Spacer(Modifier.height(16.dp))
 
+                  // 1. PANDUAN CEPAT PENGGUNAAN
+                  Card(
+                      modifier = Modifier.fillMaxWidth(),
+                      colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+                      shape = RoundedCornerShape(12.dp)
+                  ) {
+                      Column(modifier = Modifier.padding(16.dp)) {
+                          Text(
+                              "Panduan Singkat 3 Langkah",
+                              fontWeight = FontWeight.Bold,
+                              fontSize = 15.sp,
+                              color = Color(0xFF1B5E20)
+                          )
+                          Spacer(Modifier.height(8.dp))
+                          Text("1. Masukkan produk jagoan Anda di menu Hitung beserta HPP & potongan admin.", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                          Spacer(Modifier.height(4.dp))
+                          Text("2. Cek Batas Aman Iklan & BEP ROAS sebelum beriklan atau membagi komisi affiliate.", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                          Spacer(Modifier.height(4.dp))
+                          Text("3. Gunakan menu Simulasi untuk menguji risiko jika ada kenaikan biaya admin dari marketplace.", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                      }
+                  }
+
+                  Spacer(Modifier.height(14.dp))
+
+                  // 2. Q&A ISTILAH FINANSIAL
+                  Card(
+                      modifier = Modifier.fillMaxWidth(),
+                      colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
+                      shape = RoundedCornerShape(12.dp)
+                  ) {
+                      Column(modifier = Modifier.padding(16.dp)) {
+                          Text(
+                              "Tanya Jawab & Istilah (Q&A)",
+                              fontWeight = FontWeight.Bold,
+                              fontSize = 15.sp,
+                              color = Color(0xFF1E293B)
+                          )
+                          Spacer(Modifier.height(10.dp))
+
+                          // Q1
+                          Column(modifier = Modifier.fillMaxWidth().clickable { expandedQ1 = !expandedQ1 }) {
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("Apa itu BEP ROAS Minimum?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
+                                  Text(if (expandedQ1) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
+                              }
+                              AnimatedVisibility(visible = expandedQ1) {
+                                  Text(
+                                      "Nilai efektivitas balik modal iklan Anda. Jika BEP ROAS toko tertulis 3.0x, maka hasil iklan marketplace minimal harus 3.0x. Bila di bawah itu, iklan Anda sedang membakar uang rugi.",
+                                      fontSize = 12.sp,
+                                      color = Color(0xFF475569),
+                                      modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
+                                  )
+                              }
+                          }
+                          Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFFE2E8F0))
+
+                          // Q2
+                          Column(modifier = Modifier.fillMaxWidth().clickable { expandedQ2 = !expandedQ2 }) {
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("Batas Aman Iklan (Max Ads)?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
+                                  Text(if (expandedQ2) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
+                              }
+                              AnimatedVisibility(visible = expandedQ2) {
+                                  Text(
+                                      "Biaya iklan maksimal per order yang boleh dikeluarkan sebelum produk mengalami kerugian bersih.",
+                                      fontSize = 12.sp,
+                                      color = Color(0xFF475569),
+                                      modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
+                                  )
+                              }
+                          }
+                          Divider(modifier = Modifier.padding(vertical = 8.dp), color = Color(0xFFE2E8F0))
+
+                          // Q3
+                          Column(modifier = Modifier.fillMaxWidth().clickable { expandedQ3 = !expandedQ3 }) {
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("Apakah data aman & butuh internet?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
+                                  Text(if (expandedQ3) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
+                              }
+                              AnimatedVisibility(visible = expandedQ3) {
+                                  Text(
+                                      "Aplikasi 100% offline. Semua data tersimpan aman di HP Anda sendiri tanpa dikirim ke server luar manapun.",
+                                      fontSize = 12.sp,
+                                      color = Color(0xFF475569),
+                                      modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
+                                  )
+                              }
+                          }
+                      }
+                  }
+
+                  Spacer(Modifier.height(14.dp))
+
+                  // 3. TARGET MARGIN DEFAULT
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
@@ -1576,8 +1708,9 @@ jobs:
                       }
                   }
 
-                  Spacer(Modifier.height(16.dp))
+                  Spacer(Modifier.height(14.dp))
 
+                  // 4. BACKUP & RESTORE
                   Card(
                       modifier = Modifier.fillMaxWidth(),
                       colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
@@ -1621,7 +1754,7 @@ jobs:
                       }
                   }
 
-                  Spacer(Modifier.height(16.dp))
+                  Spacer(Modifier.height(14.dp))
 
                   Card(
                       modifier = Modifier.fillMaxWidth(),
@@ -1630,17 +1763,16 @@ jobs:
                   ) {
                       Column(modifier = Modifier.padding(16.dp)) {
                           Text(
-                              "Profit Control V1.0.3",
+                              "Profit Control V1.0.4",
                               fontWeight = FontWeight.Bold,
                               fontSize = 14.sp,
                               color = Color(0xFF1E293B)
                           )
                           Spacer(Modifier.height(4.dp))
                           Text(
-                              "Semua data tersimpan otomatis di memori internal HP Anda secara offline. Data tidak akan hilang saat aplikasi ditutup.",
+                              "Semua data tersimpan otomatis di memori internal HP Anda secara offline.",
                               fontSize = 12.sp,
-                              color = Color(0xFF64748B),
-                              lineHeight = 16.sp
+                              color = Color(0xFF64748B)
                           )
                       }
                   }
@@ -1716,5 +1848,5 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ProfitControl-V1.0.3-ReleaseCandidate
+          name: ProfitControl-V1.0.4-Master
           path: app/build/outputs/apk/debug/app-debug.apk
