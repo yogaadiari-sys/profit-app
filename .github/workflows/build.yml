@@ -1,4 +1,4 @@
-name: Build Profit Control APK
+name: Build Profit Control Production Release APK
 
 on:
   push:
@@ -28,12 +28,17 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      - name: Generate Android Project Structure & Icons
+      - name: Generate Android Project Structure, Keystore & Assets
         run: |
           mkdir -p app/src/main/java/com/profitcontrol/app
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/mipmap-anydpi-v26
+
+          # Generate Dedicated Production Release Keystore
+          keytool -genkeypair -v -keystore app/release.jks -alias profitcontrol -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "ProfitControlKey2026!" -keypass "ProfitControlKey2026!" \
+            -dname "CN=Profit Control, OU=Production, O=Karyaku.id, L=Jember, ST=East Java, C=ID"
 
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m
@@ -81,8 +86,8 @@ jobs:
                   applicationId = "com.profitcontrol.app"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 6
-                  versionName = "1.0.5"
+                  versionCode = 7
+                  versionName = "1.0.6"
 
                   testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                   vectorDrawables {
@@ -90,15 +95,29 @@ jobs:
                   }
               }
 
+              signingConfigs {
+                  create("release") {
+                      storeFile = file("release.jks")
+                      storePassword = "ProfitControlKey2026!"
+                      keyAlias = "profitcontrol"
+                      keyPassword = "ProfitControlKey2026!"
+                      enableV1Signing = true
+                      enableV2Signing = true
+                  }
+              }
+
               buildTypes {
                   release {
                       isMinifyEnabled = false
+                      isDebuggable = false
+                      signingConfig = signingConfigs.getByName("release")
                       proguardFiles(
                           getDefaultProguardFile("proguard-android-optimize.txt"),
                           "proguard-rules.pro"
                       )
                   }
               }
+
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
                   targetCompatibility = JavaVersion.VERSION_17
@@ -204,7 +223,7 @@ jobs:
           </resources>
           EOF
 
-      - name: Inject Source Code
+      - name: Inject Source Code V1.0.6 (Full SOT Implementation)
         run: |
           cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
           package com.profitcontrol.app
@@ -242,8 +261,13 @@ jobs:
           import androidx.compose.ui.unit.dp
           import androidx.compose.ui.unit.sp
           import com.google.gson.Gson
+          import com.google.gson.JsonDeserializationContext
+          import com.google.gson.JsonDeserializer
+          import com.google.gson.JsonElement
+          import com.google.gson.GsonBuilder
           import com.google.gson.reflect.TypeToken
           import java.io.File
+          import java.lang.reflect.Type
           import java.math.BigDecimal
           import java.math.RoundingMode
           import java.text.NumberFormat
@@ -253,139 +277,273 @@ jobs:
           data class ProductItem(
               val id: String = UUID.randomUUID().toString(),
               val name: String,
-              val sellingPrice: Double,
-              val cogs: Double,
-              val marketplaceFeePercent: Double,
-              val fixedFee: Double,
-              val packagingCost: Double,
-              val operationalCost: Double,
-              val returnReservePercent: Double,
-              val targetAds: Double,
-              val targetAffiliatePercent: Double
+              val sellingPrice: BigDecimal,
+              val unitsSold: Long,
+              val cogs: BigDecimal,
+              val packagingCost: BigDecimal,
+              val marketplaceFeePercent: BigDecimal,
+              val fixedFee: BigDecimal,
+              val voucherCost: BigDecimal,
+              val targetAffiliatePercent: BigDecimal,
+              val targetAds: BigDecimal,
+              val otherCost: BigDecimal
           )
 
           data class CalculationResult(
-              val netProfit: BigDecimal,
+              val marketplaceFeeNominal: BigDecimal,
+              val affiliateNominal: BigDecimal,
+              val totalCostPerOrder: BigDecimal,
+              val profitPerOrder: BigDecimal,
+              val totalNetProfit: BigDecimal,
               val marginPercent: BigDecimal,
-              val status: String,
-              val bepRoas: BigDecimal,
+              val profitBeforeAds: BigDecimal,
+              val bepRoas: BigDecimal?,
+              val isBepRoasFeasible: Boolean,
+              val minimumSellingPrice: BigDecimal?,
+              val isMinPriceFeasible: Boolean,
               val maxAdsLimit: BigDecimal,
+              val isMaxAdsFeasible: Boolean,
               val maxAffiliatePercentLimit: BigDecimal,
-              val affiliateNominal: BigDecimal
+              val isMaxAffiliateFeasible: Boolean,
+              val status: String
           )
 
           object ProfitEngine {
-              fun parseNominal(text: String): Double {
-                  val cleaned = text.replace(".", "").replace(",", "").trim()
-                  return cleaned.toDoubleOrNull() ?: 0.0
+              private val HUNDRED = BigDecimal("100")
+
+              fun parseBigDecimal(text: String): BigDecimal {
+                  val cleaned = text.replace(".", "").replace(",", ".").trim()
+                  return cleaned.toBigDecimalOrNull() ?: BigDecimal.ZERO
               }
 
-              fun parsePercent(text: String): Double {
+              fun parsePercent(text: String): BigDecimal {
                   val cleaned = text.replace(",", ".").trim()
-                  return cleaned.toDoubleOrNull() ?: 0.0
+                  return cleaned.toBigDecimalOrNull() ?: BigDecimal.ZERO
+              }
+
+              fun parseUnits(text: String): Long {
+                  val cleaned = text.replace(".", "").replace(",", "").trim()
+                  val num = cleaned.toLongOrNull() ?: 1L
+                  return if (num <= 0L) 1L else num
               }
 
               fun calculate(
-                  sellingPrice: Double,
-                  cogs: Double,
-                  marketplaceFeePercent: Double,
-                  fixedFee: Double,
-                  packagingCost: Double,
-                  operationalCost: Double,
-                  returnReservePercent: Double,
-                  targetAds: Double,
-                  targetAffiliatePercent: Double,
-                  targetMarginDefault: Double = 20.0
+                  sellingPrice: BigDecimal,
+                  unitsSold: Long,
+                  cogs: BigDecimal,
+                  packagingCost: BigDecimal,
+                  marketplaceFeePercent: BigDecimal,
+                  fixedFee: BigDecimal,
+                  voucherCost: BigDecimal,
+                  targetAffiliatePercent: BigDecimal,
+                  targetAds: BigDecimal,
+                  otherCost: BigDecimal,
+                  targetMarginPercent: BigDecimal = BigDecimal("20"),
+                  targetProfitPerOrder: BigDecimal = BigDecimal.ZERO
               ): CalculationResult {
-                  val price = BigDecimal.valueOf(sellingPrice)
-                  val hpp = BigDecimal.valueOf(cogs)
-                  val adminPercent = BigDecimal.valueOf(marketplaceFeePercent).divide(BigDecimal("100"), 4, RoundingMode.HALF_UP)
-                  val returPercent = BigDecimal.valueOf(returnReservePercent).divide(BigDecimal("100"), 4, RoundingMode.HALF_UP)
-                  val affPercent = BigDecimal.valueOf(targetAffiliatePercent).divide(BigDecimal("100"), 4, RoundingMode.HALF_UP)
-                  val fixed = BigDecimal.valueOf(fixedFee)
-                  val pack = BigDecimal.valueOf(packagingCost)
-                  val ops = BigDecimal.valueOf(operationalCost)
-                  val ads = BigDecimal.valueOf(targetAds)
+                  val price = sellingPrice.setScale(4, RoundingMode.HALF_UP)
+                  val units = if (unitsSold <= 0L) 1L else unitsSold
 
-                  val adminFeeNominal = price.multiply(adminPercent)
-                  val returNominal = price.multiply(returPercent)
-                  val affiliateNominal = price.multiply(affPercent).setScale(2, RoundingMode.HALF_UP)
+                  // 1. Marketplace Fee & Affiliate Fee
+                  val adminPercentFraction = marketplaceFeePercent.divide(HUNDRED, 8, RoundingMode.HALF_UP)
+                  val marketplaceFeeNominal = price.multiply(adminPercentFraction).setScale(2, RoundingMode.HALF_UP)
 
-                  val totalCost = hpp.add(adminFeeNominal)
-                      .add(fixed)
-                      .add(pack)
-                      .add(ops)
-                      .add(returNominal)
-                      .add(ads)
+                  val affPercentFraction = targetAffiliatePercent.divide(HUNDRED, 8, RoundingMode.HALF_UP)
+                  val affiliateNominal = price.multiply(affPercentFraction).setScale(2, RoundingMode.HALF_UP)
+
+                  // 2. Total Cost / Order
+                  val totalCostPerOrder = cogs
+                      .add(packagingCost)
+                      .add(marketplaceFeeNominal)
+                      .add(fixedFee)
+                      .add(voucherCost)
                       .add(affiliateNominal)
+                      .add(targetAds)
+                      .add(otherCost)
+                      .setScale(2, RoundingMode.HALF_UP)
 
-                  val netProfit = price.subtract(totalCost).setScale(2, RoundingMode.HALF_UP)
+                  // 3. Profit / Order & Total Net Profit
+                  val profitPerOrder = price.subtract(totalCostPerOrder).setScale(2, RoundingMode.HALF_UP)
+                  val totalNetProfit = profitPerOrder.multiply(BigDecimal.valueOf(units)).setScale(2, RoundingMode.HALF_UP)
 
+                  // 4. Margin %
                   val marginPercent = if (price.compareTo(BigDecimal.ZERO) > 0) {
-                      netProfit.divide(price, 4, RoundingMode.HALF_UP).multiply(BigDecimal("100")).setScale(2, RoundingMode.HALF_UP)
+                      profitPerOrder.divide(price, 6, RoundingMode.HALF_UP).multiply(HUNDRED).setScale(2, RoundingMode.HALF_UP)
                   } else {
-                      BigDecimal.ZERO
+                      BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
                   }
 
+                  // 5. Profit Before Ads
+                  val costsExcludingAds = totalCostPerOrder.subtract(targetAds)
+                  val profitBeforeAds = price.subtract(costsExcludingAds).setScale(2, RoundingMode.HALF_UP)
+
+                  // 6. BEP ROAS (Selling Price / Profit Before Ads)
+                  val isBepRoasFeasible = profitBeforeAds.compareTo(BigDecimal.ZERO) > 0 && price.compareTo(BigDecimal.ZERO) > 0
+                  val bepRoas = if (isBepRoasFeasible) {
+                      price.divide(profitBeforeAds, 2, RoundingMode.HALF_UP)
+                  } else {
+                      null
+                  }
+
+                  // 7. Status Profit
                   val status = when {
-                      netProfit < BigDecimal.ZERO -> "BONCOS"
-                      marginPercent >= BigDecimal.valueOf(targetMarginDefault) -> "SEHAT"
-                      else -> "TIPIS"
+                      profitPerOrder.compareTo(BigDecimal.ZERO) <= 0 -> "BONCOS"
+                      marginPercent.compareTo(targetMarginPercent) >= 0 -> "PROFIT SEHAT"
+                      else -> "PROFIT TIPIS"
                   }
 
-                  val grossMarginBeforePromo = price.subtract(hpp.add(adminFeeNominal).add(fixed).add(pack).add(ops).add(returNominal))
+                  // 8. Minimum Selling Price
+                  // Total Biaya Tetap = HPP + Packaging + Fixed Fee + Voucher + Other Cost + Target Ads
+                  val totalFixedCost = cogs
+                      .add(packagingCost)
+                      .add(fixedFee)
+                      .add(voucherCost)
+                      .add(otherCost)
+                      .add(targetAds)
 
-                  val bepRoas = if (grossMarginBeforePromo > BigDecimal.ZERO && price > BigDecimal.ZERO) {
-                      price.divide(grossMarginBeforePromo, 2, RoundingMode.HALF_UP)
+                  val denomPercent = HUNDRED
+                      .subtract(marketplaceFeePercent)
+                      .subtract(targetAffiliatePercent)
+                      .subtract(targetMarginPercent)
+
+                  val isMinPriceFeasible = denomPercent.compareTo(BigDecimal.ZERO) > 0
+                  val minimumSellingPrice = if (isMinPriceFeasible) {
+                      totalFixedCost.multiply(HUNDRED).divide(denomPercent, 2, RoundingMode.HALF_UP)
                   } else {
-                      BigDecimal.ZERO
+                      null
                   }
 
-                  val maxAds = if (grossMarginBeforePromo.subtract(affiliateNominal) > BigDecimal.ZERO) {
-                      grossMarginBeforePromo.subtract(affiliateNominal).setScale(2, RoundingMode.HALF_UP)
+                  // 9. Safe Limits: Maximum Ads
+                  val isMaxAdsFeasible = profitBeforeAds.compareTo(targetProfitPerOrder) >= 0
+                  val maxAdsLimit = if (isMaxAdsFeasible) {
+                      profitBeforeAds.subtract(targetProfitPerOrder).setScale(2, RoundingMode.HALF_UP)
                   } else {
-                      BigDecimal.ZERO
+                      BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
                   }
 
-                  val maxAffPercent = if (grossMarginBeforePromo.subtract(ads) > BigDecimal.ZERO && price > BigDecimal.ZERO) {
-                      grossMarginBeforePromo.subtract(ads).divide(price, 4, RoundingMode.HALF_UP).multiply(BigDecimal("100")).setScale(2, RoundingMode.HALF_UP)
+                  // 10. Safe Limits: Maximum Affiliate %
+                  // Non-Affiliate Costs = HPP + Packaging + Marketplace Fee + Fixed Fee + Voucher + Ads + Other Cost
+                  val nonAffiliateCosts = cogs
+                      .add(packagingCost)
+                      .add(marketplaceFeeNominal)
+                      .add(fixedFee)
+                      .add(voucherCost)
+                      .add(targetAds)
+                      .add(otherCost)
+
+                  val numerator = price.subtract(nonAffiliateCosts).subtract(targetProfitPerOrder)
+                  val isMaxAffiliateFeasible = numerator.compareTo(BigDecimal.ZERO) >= 0 && price.compareTo(BigDecimal.ZERO) > 0
+                  val maxAffiliatePercentLimit = if (isMaxAffiliateFeasible) {
+                      numerator.divide(price, 6, RoundingMode.HALF_UP).multiply(HUNDRED).setScale(2, RoundingMode.HALF_UP)
                   } else {
-                      BigDecimal.ZERO
+                      BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
                   }
 
                   return CalculationResult(
-                      netProfit = netProfit,
+                      marketplaceFeeNominal = marketplaceFeeNominal,
+                      affiliateNominal = affiliateNominal,
+                      totalCostPerOrder = totalCostPerOrder,
+                      profitPerOrder = profitPerOrder,
+                      totalNetProfit = totalNetProfit,
                       marginPercent = marginPercent,
-                      status = status,
+                      profitBeforeAds = profitBeforeAds,
                       bepRoas = bepRoas,
-                      maxAdsLimit = maxAds,
-                      maxAffiliatePercentLimit = maxAffPercent,
-                      affiliateNominal = affiliateNominal
+                      isBepRoasFeasible = isBepRoasFeasible,
+                      minimumSellingPrice = minimumSellingPrice,
+                      isMinPriceFeasible = isMinPriceFeasible,
+                      maxAdsLimit = maxAdsLimit,
+                      isMaxAdsFeasible = isMaxAdsFeasible,
+                      maxAffiliatePercentLimit = maxAffiliatePercentLimit,
+                      isMaxAffiliateFeasible = isMaxAffiliateFeasible,
+                      status = status
                   )
               }
 
-              fun formatRupiah(amount: BigDecimal): String {
+              fun formatRupiah(amount: BigDecimal?): String {
+                  if (amount == null) return "Rp 0"
                   val formatter = NumberFormat.getCurrencyInstance(Locale("in", "ID"))
                   formatter.maximumFractionDigits = 0
                   return formatter.format(amount).replace("Rp", "Rp ")
               }
 
-              fun formatRupiah(amount: Double): String {
-                  return formatRupiah(BigDecimal.valueOf(amount))
+              fun formatNumber(amount: BigDecimal): String {
+                  return amount.setScale(0, RoundingMode.HALF_UP).toPlainString()
+              }
+
+              fun formatDecimal(amount: BigDecimal): String {
+                  return amount.stripTrailingZeros().toPlainString()
+              }
+          }
+
+          class ProductItemDeserializer : JsonDeserializer<ProductItem> {
+              override fun deserialize(json: JsonElement, typeOfT: Type, context: JsonDeserializationContext): ProductItem {
+                  val obj = json.asJsonObject
+                  val id = if (obj.has("id")) obj.get("id").asString else UUID.randomUUID().toString()
+                  val name = if (obj.has("name")) obj.get("name").asString else "Produk"
+
+                  fun getBd(field: String, default: BigDecimal = BigDecimal.ZERO): BigDecimal {
+                      if (!obj.has(field)) return default
+                      return try {
+                          BigDecimal(obj.get(field).asString)
+                      } catch (e: Exception) {
+                          try { BigDecimal.valueOf(obj.get(field).asDouble) } catch (_: Exception) { default }
+                      }
+                  }
+
+                  val sellingPrice = getBd("sellingPrice")
+                  val cogs = getBd("cogs")
+                  val marketplaceFeePercent = getBd("marketplaceFeePercent", BigDecimal("6.5"))
+                  val fixedFee = getBd("fixedFee", BigDecimal("1000"))
+                  val packagingCost = getBd("packagingCost", BigDecimal("2000"))
+                  val targetAds = getBd("targetAds", BigDecimal("5000"))
+                  val targetAffiliatePercent = getBd("targetAffiliatePercent", BigDecimal("5"))
+
+                  // Migrasi field SOT V1.0.6
+                  val unitsSold = if (obj.has("unitsSold")) obj.get("unitsSold").asLong else 1L
+                  val voucherCost = getBd("voucherCost", BigDecimal.ZERO)
+                  val otherCost = if (obj.has("otherCost")) getBd("otherCost") else getBd("operationalCost", BigDecimal("1500"))
+
+                  return ProductItem(
+                      id = id,
+                      name = name,
+                      sellingPrice = sellingPrice,
+                      unitsSold = if (unitsSold <= 0L) 1L else unitsSold,
+                      cogs = cogs,
+                      packagingCost = packagingCost,
+                      marketplaceFeePercent = marketplaceFeePercent,
+                      fixedFee = fixedFee,
+                      voucherCost = voucherCost,
+                      targetAffiliatePercent = targetAffiliatePercent,
+                      targetAds = targetAds,
+                      otherCost = otherCost
+                  )
               }
           }
 
           class ProfitRepository(private val context: Context) {
               private val file = File(context.filesDir, "profit_control_db.json")
               private val pref = context.getSharedPreferences("profit_prefs", Context.MODE_PRIVATE)
-              private val gson = Gson()
+              private val gson: Gson = GsonBuilder()
+                  .registerTypeAdapter(ProductItem::class.java, ProductItemDeserializer())
+                  .setPrettyPrinting()
+                  .create()
 
-              fun getTargetMargin(): Double {
-                  return pref.getFloat("target_margin", 20.0f).toDouble()
+              fun getTargetMargin(): BigDecimal {
+                  val stored = pref.getString("target_margin_bd", "20") ?: "20"
+                  return BigDecimal(stored)
               }
 
-              fun setTargetMargin(margin: Double) {
-                  pref.edit().putFloat("target_margin", margin.toFloat()).apply()
+              fun setTargetMargin(margin: BigDecimal) {
+                  pref.edit().putString("target_margin_bd", margin.toPlainString()).apply()
+              }
+
+              fun getTargetProfitPerOrder(): BigDecimal {
+                  val stored = pref.getString("target_profit_bd", "10000") ?: "10000"
+                  return BigDecimal(stored)
+              }
+
+              fun setTargetProfitPerOrder(profit: BigDecimal) {
+                  pref.edit().putString("target_profit_bd", profit.toPlainString()).apply()
               }
 
               fun loadProducts(): List<ProductItem> {
@@ -394,15 +552,16 @@ jobs:
                           val sample = listOf(
                               ProductItem(
                                   name = "[CONTOH] Kaos Polos",
-                                  sellingPrice = 85000.0,
-                                  cogs = 45000.0,
-                                  marketplaceFeePercent = 6.5,
-                                  fixedFee = 1000.0,
-                                  packagingCost = 2000.0,
-                                  operationalCost = 1500.0,
-                                  returnReservePercent = 2.0,
-                                  targetAds = 5000.0,
-                                  targetAffiliatePercent = 5.0
+                                  sellingPrice = BigDecimal("85000"),
+                                  unitsSold = 50L,
+                                  cogs = BigDecimal("45000"),
+                                  packagingCost = BigDecimal("2000"),
+                                  marketplaceFeePercent = BigDecimal("6.5"),
+                                  fixedFee = BigDecimal("1000"),
+                                  voucherCost = BigDecimal("0"),
+                                  targetAffiliatePercent = BigDecimal("5.0"),
+                                  targetAds = BigDecimal("5000"),
+                                  otherCost = BigDecimal("1500")
                               )
                           )
                           saveProducts(sample)
@@ -410,7 +569,7 @@ jobs:
                       } else {
                           val json = file.readText()
                           val type = object : TypeToken<List<ProductItem>>() {}.type
-                          gson.fromJson(json, type) ?: emptyList()
+                          gson.fromJson<List<ProductItem>>(json, type) ?: emptyList()
                       }
                   } catch (e: Exception) {
                       emptyList()
@@ -486,7 +645,8 @@ jobs:
           fun MainApp(repository: ProfitRepository) {
               var currentTab by remember { mutableStateOf(NavTab.HOME) }
               var products by remember { mutableStateOf(repository.loadProducts()) }
-              var targetMargin by remember { mutableDoubleStateOf(repository.getTargetMargin()) }
+              var targetMargin by remember { mutableStateOf(repository.getTargetMargin()) }
+              var targetProfit by remember { mutableStateOf(repository.getTargetProfitPerOrder()) }
 
               val tabs = remember { listOf(NavTab.HOME, NavTab.HITUNG, NavTab.SIMULASI, NavTab.PRODUK, NavTab.SETTING) }
 
@@ -553,11 +713,13 @@ jobs:
                           NavTab.HOME -> HomeScreen(
                               products = products,
                               targetMargin = targetMargin,
+                              targetProfit = targetProfit,
                               onNavigateToHitung = { currentTab = NavTab.HITUNG },
                               onNavigateToSimulator = { currentTab = NavTab.SIMULASI }
                           )
                           NavTab.HITUNG -> HitungScreen(
                               targetMargin = targetMargin,
+                              targetProfit = targetProfit,
                               onSaveProduct = { newProduct ->
                                   val updated = products + newProduct
                                   products = updated
@@ -567,11 +729,13 @@ jobs:
                           )
                           NavTab.SIMULASI -> SimulasiScreen(
                               products = products,
-                              targetMargin = targetMargin
+                              targetMargin = targetMargin,
+                              targetProfit = targetProfit
                           )
                           NavTab.PRODUK -> ProdukScreen(
                               products = products,
                               targetMargin = targetMargin,
+                              targetProfit = targetProfit,
                               onDeleteProduct = { id ->
                                   val updated = products.filterNot { it.id == id }
                                   products = updated
@@ -585,14 +749,20 @@ jobs:
                           )
                           NavTab.SETTING -> SettingScreen(
                               targetMargin = targetMargin,
+                              targetProfit = targetProfit,
                               onSaveTargetMargin = { newTarget ->
                                   targetMargin = newTarget
                                   repository.setTargetMargin(newTarget)
+                              },
+                              onSaveTargetProfit = { newTargetProfit ->
+                                  targetProfit = newTargetProfit
+                                  repository.setTargetProfitPerOrder(newTargetProfit)
                               },
                               repository = repository,
                               onDataRestored = {
                                   products = repository.loadProducts()
                                   targetMargin = repository.getTargetMargin()
+                                  targetProfit = repository.getTargetProfitPerOrder()
                               }
                           )
                       }
@@ -603,30 +773,33 @@ jobs:
           @Composable
           fun HomeScreen(
               products: List<ProductItem>,
-              targetMargin: Double,
+              targetMargin: BigDecimal,
+              targetProfit: BigDecimal,
               onNavigateToHitung: () -> Unit,
               onNavigateToSimulator: () -> Unit
           ) {
-              val results = remember(products, targetMargin) {
+              val results = remember(products, targetMargin, targetProfit) {
                   products.map { p ->
                       p to ProfitEngine.calculate(
                           sellingPrice = p.sellingPrice,
+                          unitsSold = p.unitsSold,
                           cogs = p.cogs,
+                          packagingCost = p.packagingCost,
                           marketplaceFeePercent = p.marketplaceFeePercent,
                           fixedFee = p.fixedFee,
-                          packagingCost = p.packagingCost,
-                          operationalCost = p.operationalCost,
-                          returnReservePercent = p.returnReservePercent,
-                          targetAds = p.targetAds,
+                          voucherCost = p.voucherCost,
                           targetAffiliatePercent = p.targetAffiliatePercent,
-                          targetMarginDefault = targetMargin
+                          targetAds = p.targetAds,
+                          otherCost = p.otherCost,
+                          targetMarginPercent = targetMargin,
+                          targetProfitPerOrder = targetProfit
                       )
                   }
               }
 
-              val totalProfit = results.fold(BigDecimal.ZERO) { acc, pair -> acc.add(pair.second.netProfit) }
-              val attentionCount = results.count { it.second.status != "SEHAT" }
-              val topProduct = results.maxByOrNull { it.second.netProfit }?.first?.name?.replaceFirstChar { it.uppercase() } ?: "-"
+              val totalAccumulatedProfit = results.fold(BigDecimal.ZERO) { acc, pair -> acc.add(pair.second.totalNetProfit) }
+              val attentionCount = results.count { it.second.status != "PROFIT SEHAT" }
+              val topProduct = results.maxByOrNull { it.second.totalNetProfit }?.first?.name?.replaceFirstChar { it.uppercase() } ?: "-"
 
               Column(
                   modifier = Modifier
@@ -640,7 +813,12 @@ jobs:
                       fontWeight = FontWeight.Bold,
                       color = Color(0xFF1E293B)
                   )
-                  Spacer(Modifier.height(16.dp))
+                  Text(
+                      text = "Akumulasi profit riil berdasarkan volume penjualan produk.",
+                      fontSize = 12.sp,
+                      color = Color(0xFF64748B)
+                  )
+                  Spacer(Modifier.height(14.dp))
 
                   Row(modifier = Modifier.fillMaxWidth()) {
                       Card(
@@ -650,14 +828,14 @@ jobs:
                           colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
                           shape = RoundedCornerShape(12.dp)
                       ) {
-                          Column(modifier = Modifier.padding(16.dp)) {
-                              Text("Total Net Profit", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                          Column(modifier = Modifier.padding(14.dp)) {
+                              Text("Total Net Profit", fontSize = 11.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.SemiBold)
                               Spacer(Modifier.height(6.dp))
                               Text(
-                                  ProfitEngine.formatRupiah(totalProfit),
+                                  ProfitEngine.formatRupiah(totalAccumulatedProfit),
                                   fontSize = 16.sp,
                                   fontWeight = FontWeight.Bold,
-                                  color = if (totalProfit >= BigDecimal.ZERO) Color(0xFF1B5E20) else Color(0xFFB71C1C)
+                                  color = if (totalAccumulatedProfit >= BigDecimal.ZERO) Color(0xFF1B5E20) else Color(0xFFB71C1C)
                               )
                           }
                       }
@@ -668,15 +846,15 @@ jobs:
                           colors = CardDefaults.cardColors(containerColor = Color(0xFFE3F2FD)),
                           shape = RoundedCornerShape(12.dp)
                       ) {
-                          Column(modifier = Modifier.padding(16.dp)) {
-                              Text("Total Produk", fontSize = 12.sp, color = Color(0xFF1565C0))
+                          Column(modifier = Modifier.padding(14.dp)) {
+                              Text("Total Produk", fontSize = 11.sp, color = Color(0xFF1565C0), fontWeight = FontWeight.SemiBold)
                               Spacer(Modifier.height(6.dp))
                               Text("${products.size} Produk", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF0D47A1))
                           }
                       }
                   }
 
-                  Spacer(Modifier.height(12.dp))
+                  Spacer(Modifier.height(10.dp))
 
                   Row(modifier = Modifier.fillMaxWidth()) {
                       Card(
@@ -686,8 +864,8 @@ jobs:
                           colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8E1)),
                           shape = RoundedCornerShape(12.dp)
                       ) {
-                          Column(modifier = Modifier.padding(16.dp)) {
-                              Text("Perlu Perhatian", fontSize = 12.sp, color = Color(0xFFE65100))
+                          Column(modifier = Modifier.padding(14.dp)) {
+                              Text("Perlu Perhatian", fontSize = 11.sp, color = Color(0xFFE65100), fontWeight = FontWeight.SemiBold)
                               Spacer(Modifier.height(6.dp))
                               Text("$attentionCount Item", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFFBF360C))
                           }
@@ -699,10 +877,10 @@ jobs:
                           colors = CardDefaults.cardColors(containerColor = Color(0xFFF3F4F6)),
                           shape = RoundedCornerShape(12.dp)
                       ) {
-                          Column(modifier = Modifier.padding(16.dp)) {
-                              Text("Profit Tertinggi", fontSize = 12.sp, color = Color(0xFF4B5563))
+                          Column(modifier = Modifier.padding(14.dp)) {
+                              Text("Profit Tertinggi", fontSize = 11.sp, color = Color(0xFF4B5563), fontWeight = FontWeight.SemiBold)
                               Spacer(Modifier.height(6.dp))
-                              Text(topProduct, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1F2937))
+                              Text(topProduct, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color(0xFF1F2937), maxLines = 1)
                           }
                       }
                   }
@@ -745,46 +923,51 @@ jobs:
 
           @Composable
           fun HitungScreen(
-              targetMargin: Double,
+              targetMargin: BigDecimal,
+              targetProfit: BigDecimal,
               onSaveProduct: (ProductItem) -> Unit
           ) {
               var name by remember { mutableStateOf("") }
               var priceText by remember { mutableStateOf("") }
+              var unitsText by remember { mutableStateOf("1") }
               var cogsText by remember { mutableStateOf("") }
+              var packingText by remember { mutableStateOf("2000") }
               var feeText by remember { mutableStateOf("6.5") }
               var fixedText by remember { mutableStateOf("1000") }
-              var packingText by remember { mutableStateOf("2000") }
-              var opsText by remember { mutableStateOf("1500") }
-              var returText by remember { mutableStateOf("2.0") }
-              var adsText by remember { mutableStateOf("5000") }
+              var voucherText by remember { mutableStateOf("0") }
               var affPercentText by remember { mutableStateOf("5.0") }
+              var adsText by remember { mutableStateOf("5000") }
+              var otherText by remember { mutableStateOf("1500") }
 
               val context = LocalContext.current
 
-              val price = ProfitEngine.parseNominal(priceText)
-              val cogs = ProfitEngine.parseNominal(cogsText)
+              val price = ProfitEngine.parseBigDecimal(priceText)
+              val units = ProfitEngine.parseUnits(unitsText)
+              val cogs = ProfitEngine.parseBigDecimal(cogsText)
+              val packing = ProfitEngine.parseBigDecimal(packingText)
               val fee = ProfitEngine.parsePercent(feeText)
-              val fixed = ProfitEngine.parseNominal(fixedText)
-              val packing = ProfitEngine.parseNominal(packingText)
-              val ops = ProfitEngine.parseNominal(opsText)
-              val retur = ProfitEngine.parsePercent(returText)
-              val ads = ProfitEngine.parseNominal(adsText)
+              val fixed = ProfitEngine.parseBigDecimal(fixedText)
+              val voucher = ProfitEngine.parseBigDecimal(voucherText)
               val affPercent = ProfitEngine.parsePercent(affPercentText)
+              val ads = ProfitEngine.parseBigDecimal(adsText)
+              val other = ProfitEngine.parseBigDecimal(otherText)
 
-              val hasInput = price > 0.0
+              val hasInput = price.compareTo(BigDecimal.ZERO) > 0
 
-              val result = remember(price, cogs, fee, fixed, packing, ops, retur, ads, affPercent, targetMargin) {
+              val result = remember(price, units, cogs, packing, fee, fixed, voucher, affPercent, ads, other, targetMargin, targetProfit) {
                   ProfitEngine.calculate(
                       sellingPrice = price,
+                      unitsSold = units,
                       cogs = cogs,
+                      packagingCost = packing,
                       marketplaceFeePercent = fee,
                       fixedFee = fixed,
-                      packagingCost = packing,
-                      operationalCost = ops,
-                      returnReservePercent = retur,
-                      targetAds = ads,
+                      voucherCost = voucher,
                       targetAffiliatePercent = affPercent,
-                      targetMarginDefault = targetMargin
+                      targetAds = ads,
+                      otherCost = other,
+                      targetMarginPercent = targetMargin,
+                      targetProfitPerOrder = targetProfit
                   )
               }
 
@@ -795,7 +978,7 @@ jobs:
                       .padding(16.dp)
               ) {
                   Text(
-                      text = "Hitung Profit Produk",
+                      text = "Hitung Profit SOT",
                       fontSize = 20.sp,
                       fontWeight = FontWeight.Bold,
                       color = Color(0xFF1E293B)
@@ -806,7 +989,8 @@ jobs:
                       value = name,
                       onValueChange = { name = it },
                       label = { Text("Nama Produk *") },
-                      modifier = Modifier.fillMaxWidth()
+                      modifier = Modifier.fillMaxWidth(),
+                      singleLine = true
                   )
                   Spacer(Modifier.height(8.dp))
 
@@ -814,84 +998,76 @@ jobs:
                       OutlinedTextField(
                           value = priceText,
                           onValueChange = { priceText = it },
-                          label = { Text("Harga Jual (Rp)") },
+                          label = { Text("Harga Jual (Rp) *") },
                           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                          modifier = Modifier
-                              .weight(1f)
-                              .padding(end = 4.dp)
+                          modifier = Modifier.weight(1.3f).padding(end = 4.dp),
+                          singleLine = true
                       )
+                      OutlinedTextField(
+                          value = unitsText,
+                          onValueChange = { unitsText = it },
+                          label = { Text("Unit Terjual") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                          modifier = Modifier.weight(0.7f).padding(start = 4.dp),
+                          singleLine = true
+                      )
+                  }
+
+                  Spacer(Modifier.height(8.dp))
+                  Row(modifier = Modifier.fillMaxWidth()) {
                       OutlinedTextField(
                           value = cogsText,
                           onValueChange = { cogsText = it },
-                          label = { Text("HPP / Modal (Rp)") },
+                          label = { Text("HPP / Modal (Rp) *") },
                           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                          modifier = Modifier
-                              .weight(1f)
-                              .padding(start = 4.dp)
+                          modifier = Modifier.weight(1f).padding(end = 4.dp),
+                          singleLine = true
+                      )
+                      OutlinedTextField(
+                          value = packingText,
+                          onValueChange = { packingText = it },
+                          label = { Text("Packaging (Rp)") },
+                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                          modifier = Modifier.weight(1f).padding(start = 4.dp),
+                          singleLine = true
                       )
                   }
 
                   Spacer(Modifier.height(14.dp))
-                  Text("Biaya Marketplace", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+                  Text("Biaya Marketplace & Potongan", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
                   Spacer(Modifier.height(6.dp))
 
                   Row(modifier = Modifier.fillMaxWidth()) {
                       OutlinedTextField(
                           value = feeText,
                           onValueChange = { feeText = it },
-                          label = { Text("Admin (%)") },
+                          label = { Text("Fee (%)") },
                           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                          modifier = Modifier
-                              .weight(1f)
-                              .padding(end = 4.dp)
+                          modifier = Modifier.weight(1f).padding(end = 4.dp),
+                          singleLine = true
                       )
                       OutlinedTextField(
                           value = fixedText,
                           onValueChange = { fixedText = it },
                           label = { Text("Fixed Fee (Rp)") },
                           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                          modifier = Modifier
-                              .weight(1f)
-                              .padding(start = 4.dp)
-                      )
-                  }
-
-                  Spacer(Modifier.height(14.dp))
-                  Text("Beban Operasional & Risiko", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
-                  Spacer(Modifier.height(6.dp))
-
-                  Row(modifier = Modifier.fillMaxWidth()) {
-                      OutlinedTextField(
-                          value = packingText,
-                          onValueChange = { packingText = it },
-                          label = { Text("Packing (Rp)") },
-                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                          modifier = Modifier
-                              .weight(1f)
-                              .padding(end = 4.dp)
-                      )
-                      OutlinedTextField(
-                          value = opsText,
-                          onValueChange = { opsText = it },
-                          label = { Text("Operasional (Rp)") },
-                          keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                          modifier = Modifier
-                              .weight(1f)
-                              .padding(start = 4.dp)
+                          modifier = Modifier.weight(1f).padding(start = 4.dp),
+                          singleLine = true
                       )
                   }
 
                   Spacer(Modifier.height(8.dp))
                   OutlinedTextField(
-                      value = returText,
-                      onValueChange = { returText = it },
-                      label = { Text("Cadangan Retur (%)") },
-                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                      modifier = Modifier.fillMaxWidth()
+                      value = voucherText,
+                      onValueChange = { voucherText = it },
+                      label = { Text("Voucher / Diskon Toko (Rp / Order)") },
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                      modifier = Modifier.fillMaxWidth(),
+                      singleLine = true
                   )
 
                   Spacer(Modifier.height(14.dp))
-                  Text("Promosi, Iklan & Komisi", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
+                  Text("Promosi, Iklan & Biaya Lainnya", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF64748B))
                   Spacer(Modifier.height(6.dp))
 
                   Row(modifier = Modifier.fillMaxWidth()) {
@@ -900,20 +1076,28 @@ jobs:
                           onValueChange = { adsText = it },
                           label = { Text("Iklan / Order (Rp)") },
                           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                          modifier = Modifier
-                              .weight(1f)
-                              .padding(end = 4.dp)
+                          modifier = Modifier.weight(1f).padding(end = 4.dp),
+                          singleLine = true
                       )
                       OutlinedTextField(
                           value = affPercentText,
                           onValueChange = { affPercentText = it },
                           label = { Text("Affiliate (%)") },
                           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                          modifier = Modifier
-                              .weight(1f)
-                              .padding(start = 4.dp)
+                          modifier = Modifier.weight(1f).padding(start = 4.dp),
+                          singleLine = true
                       )
                   }
+
+                  Spacer(Modifier.height(8.dp))
+                  OutlinedTextField(
+                      value = otherText,
+                      onValueChange = { otherText = it },
+                      label = { Text("Other Cost / Order (Rp)") },
+                      keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                      modifier = Modifier.fillMaxWidth(),
+                      singleLine = true
+                  )
 
                   Spacer(Modifier.height(18.dp))
 
@@ -925,7 +1109,7 @@ jobs:
                       ) {
                           Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                               Text(
-                                  "Masukkan Harga Jual untuk melihat analisis profit & batas aman iklan.",
+                                  "Masukkan Harga Jual untuk melihat analisis margin, BEP ROAS, & safe limits.",
                                   color = Color(0xFF64748B),
                                   fontSize = 13.sp,
                                   fontWeight = FontWeight.Medium
@@ -934,8 +1118,8 @@ jobs:
                       }
                   } else {
                       val (statusBg, statusColor) = when (result.status) {
-                          "SEHAT" -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
-                          "TIPIS" -> Color(0xFFFFF3E0) to Color(0xFFE65100)
+                          "PROFIT SEHAT" -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
+                          "PROFIT TIPIS" -> Color(0xFFFFF3E0) to Color(0xFFE65100)
                           else -> Color(0xFFFFEBEE) to Color(0xFFC62828)
                       }
 
@@ -951,9 +1135,9 @@ jobs:
                                   verticalAlignment = Alignment.CenterVertically
                               ) {
                                   Column {
-                                      Text("HASIL PROFIT", fontSize = 11.sp, color = statusColor, fontWeight = FontWeight.Bold)
+                                      Text("PROFIT / ORDER", fontSize = 11.sp, color = statusColor, fontWeight = FontWeight.Bold)
                                       Text(
-                                          ProfitEngine.formatRupiah(result.netProfit),
+                                          ProfitEngine.formatRupiah(result.profitPerOrder),
                                           fontSize = 22.sp,
                                           fontWeight = FontWeight.Bold,
                                           color = statusColor
@@ -973,13 +1157,16 @@ jobs:
                                   }
                               }
 
-                              Spacer(Modifier.height(10.dp))
-                              Box(
-                                  modifier = Modifier
-                                      .fillMaxWidth()
-                                      .height(1.dp)
-                                      .background(statusColor.copy(alpha = 0.2f))
+                              Spacer(Modifier.height(6.dp))
+                              Text(
+                                  "Total Net Profit (${units} Unit): ${ProfitEngine.formatRupiah(result.totalNetProfit)}",
+                                  fontSize = 13.sp,
+                                  fontWeight = FontWeight.Bold,
+                                  color = statusColor
                               )
+
+                              Spacer(Modifier.height(10.dp))
+                              Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(statusColor.copy(alpha = 0.2f)))
                               Spacer(Modifier.height(10.dp))
 
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -987,20 +1174,56 @@ jobs:
                                   Text("${result.marginPercent}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
                               }
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                  Text("Potongan Affiliate (${affPercent}%):", fontSize = 13.sp, color = Color(0xFF334155))
-                                  Text(ProfitEngine.formatRupiah(result.affiliateNominal), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                                  Text("Total Biaya / Order:", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text(ProfitEngine.formatRupiah(result.totalCostPerOrder), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
                               }
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                   Text("BEP ROAS Minimum:", fontSize = 13.sp, color = Color(0xFF334155))
-                                  Text("${result.bepRoas}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                                  Text(
+                                      if (result.isBepRoasFeasible) "${result.bepRoas}x" else "Tidak Feasible (<= 0)",
+                                      fontSize = 13.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = if (result.isBepRoasFeasible) Color(0xFF334155) else Color(0xFFBA1A1A)
+                                  )
                               }
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                  Text("Batas Aman Iklan (Max Ads):", fontSize = 13.sp, color = Color(0xFF334155))
-                                  Text(ProfitEngine.formatRupiah(result.maxAdsLimit), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                                  Text("Harga Jual Minimum (Target ${targetMargin}%):", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text(
+                                      if (result.isMinPriceFeasible) ProfitEngine.formatRupiah(result.minimumSellingPrice) else "Tidak Feasible",
+                                      fontSize = 13.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = if (result.isMinPriceFeasible) Color(0xFF006D5B) else Color(0xFFBA1A1A)
+                                  )
+                              }
+
+                              Spacer(Modifier.height(6.dp))
+                              Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(statusColor.copy(alpha = 0.2f)))
+                              Spacer(Modifier.height(6.dp))
+
+                              Text(
+                                  "Safe Limits (Target Profit: ${ProfitEngine.formatRupiah(targetProfit)}/order)",
+                                  fontSize = 12.sp,
+                                  fontWeight = FontWeight.Bold,
+                                  color = Color(0xFF475569)
+                              )
+                              Spacer(Modifier.height(4.dp))
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("• Batas Aman Iklan (Max Ads):", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text(
+                                      if (result.isMaxAdsFeasible) ProfitEngine.formatRupiah(result.maxAdsLimit) else "Tidak Feasible (Rp 0)",
+                                      fontSize = 13.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = if (result.isMaxAdsFeasible) Color(0xFF334155) else Color(0xFFBA1A1A)
+                                  )
                               }
                               Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                  Text("Batas Aman Komisi Affiliate:", fontSize = 13.sp, color = Color(0xFF334155))
-                                  Text("${result.maxAffiliatePercentLimit}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                                  Text("• Batas Aman Komisi Affiliate:", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text(
+                                      if (result.isMaxAffiliateFeasible) "${result.maxAffiliatePercentLimit}%" else "Tidak Feasible (0.0%)",
+                                      fontSize = 13.sp,
+                                      fontWeight = FontWeight.Bold,
+                                      color = if (result.isMaxAffiliateFeasible) Color(0xFF334155) else Color(0xFFBA1A1A)
+                                  )
                               }
                           }
                       }
@@ -1010,21 +1233,22 @@ jobs:
 
                   Button(
                       onClick = {
-                          if (name.isBlank() || price <= 0.0) {
+                          if (name.isBlank() || price.compareTo(BigDecimal.ZERO) <= 0) {
                               Toast.makeText(context, "Harap isi nama produk dan harga jual!", Toast.LENGTH_SHORT).show()
                           } else {
                               onSaveProduct(
                                   ProductItem(
                                       name = name.trim(),
                                       sellingPrice = price,
+                                      unitsSold = units,
                                       cogs = cogs,
+                                      packagingCost = packing,
                                       marketplaceFeePercent = fee,
                                       fixedFee = fixed,
-                                      packagingCost = packing,
-                                      operationalCost = ops,
-                                      returnReservePercent = retur,
+                                      voucherCost = voucher,
+                                      targetAffiliatePercent = affPercent,
                                       targetAds = ads,
-                                      targetAffiliatePercent = affPercent
+                                      otherCost = other
                                   )
                               )
                               name = ""
@@ -1033,9 +1257,7 @@ jobs:
                               Toast.makeText(context, "Produk berhasil disimpan!", Toast.LENGTH_SHORT).show()
                           }
                       },
-                      modifier = Modifier
-                          .fillMaxWidth()
-                          .height(50.dp),
+                      modifier = Modifier.fillMaxWidth().height(50.dp),
                       colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B)),
                       shape = RoundedCornerShape(10.dp)
                   ) {
@@ -1049,48 +1271,69 @@ jobs:
           @Composable
           fun SimulasiScreen(
               products: List<ProductItem>,
-              targetMargin: Double
+              targetMargin: BigDecimal,
+              targetProfit: BigDecimal
           ) {
               var selectedProductIndex by remember { mutableIntStateOf(0) }
               var isDropdownExpanded by remember { mutableStateOf(false) }
 
               val baseProduct = products.getOrNull(selectedProductIndex)
 
-              var simPriceText by remember(baseProduct) { mutableStateOf(baseProduct?.sellingPrice?.toLong()?.toString() ?: "0") }
-              var simFeeText by remember(baseProduct) { mutableStateOf(baseProduct?.marketplaceFeePercent?.toString() ?: "0") }
-              var simFixedText by remember(baseProduct) { mutableStateOf(baseProduct?.fixedFee?.toLong()?.toString() ?: "0") }
-              var simAdsText by remember(baseProduct) { mutableStateOf(baseProduct?.targetAds?.toLong()?.toString() ?: "0") }
-              var simAffPercentText by remember(baseProduct) { mutableStateOf(baseProduct?.targetAffiliatePercent?.toString() ?: "0") }
+              var simPriceText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatNumber(it.sellingPrice) } ?: "0") }
+              var simCogsText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatNumber(it.cogs) } ?: "0") }
+              var simPackText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatNumber(it.packagingCost) } ?: "0") }
+              var simFeeText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatDecimal(it.marketplaceFeePercent) } ?: "0") }
+              var simFixedText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatNumber(it.fixedFee) } ?: "0") }
+              var simVoucherText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatNumber(it.voucherCost) } ?: "0") }
+              var simAffText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatDecimal(it.targetAffiliatePercent) } ?: "0") }
+              var simAdsText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatNumber(it.targetAds) } ?: "0") }
+              var simOtherText by remember(baseProduct) { mutableStateOf(baseProduct?.let { ProfitEngine.formatNumber(it.otherCost) } ?: "0") }
 
-              val beforeResult = remember(baseProduct, targetMargin) {
+              val beforeResult = remember(baseProduct, targetMargin, targetProfit) {
                   baseProduct?.let {
                       ProfitEngine.calculate(
-                          it.sellingPrice, it.cogs, it.marketplaceFeePercent,
-                          it.fixedFee, it.packagingCost, it.operationalCost,
-                          it.returnReservePercent, it.targetAds, it.targetAffiliatePercent, targetMargin
+                          sellingPrice = it.sellingPrice,
+                          unitsSold = it.unitsSold,
+                          cogs = it.cogs,
+                          packagingCost = it.packagingCost,
+                          marketplaceFeePercent = it.marketplaceFeePercent,
+                          fixedFee = it.fixedFee,
+                          voucherCost = it.voucherCost,
+                          targetAffiliatePercent = it.targetAffiliatePercent,
+                          targetAds = it.targetAds,
+                          otherCost = it.otherCost,
+                          targetMarginPercent = targetMargin,
+                          targetProfitPerOrder = targetProfit
                       )
                   }
               }
 
-              val afterResult by remember(baseProduct, simPriceText, simFeeText, simFixedText, simAdsText, simAffPercentText, targetMargin) {
+              val afterResult by remember(baseProduct, simPriceText, simCogsText, simPackText, simFeeText, simFixedText, simVoucherText, simAffText, simAdsText, simOtherText, targetMargin, targetProfit) {
                   derivedStateOf {
                       baseProduct?.let {
-                          val p = ProfitEngine.parseNominal(simPriceText)
+                          val p = ProfitEngine.parseBigDecimal(simPriceText)
+                          val c = ProfitEngine.parseBigDecimal(simCogsText)
+                          val pk = ProfitEngine.parseBigDecimal(simPackText)
                           val f = ProfitEngine.parsePercent(simFeeText)
-                          val fx = ProfitEngine.parseNominal(simFixedText)
-                          val a = ProfitEngine.parseNominal(simAdsText)
-                          val af = ProfitEngine.parsePercent(simAffPercentText)
+                          val fx = ProfitEngine.parseBigDecimal(simFixedText)
+                          val v = ProfitEngine.parseBigDecimal(simVoucherText)
+                          val af = ProfitEngine.parsePercent(simAffText)
+                          val a = ProfitEngine.parseBigDecimal(simAdsText)
+                          val o = ProfitEngine.parseBigDecimal(simOtherText)
+
                           ProfitEngine.calculate(
                               sellingPrice = p,
-                              cogs = it.cogs,
+                              unitsSold = it.unitsSold,
+                              cogs = c,
+                              packagingCost = pk,
                               marketplaceFeePercent = f,
                               fixedFee = fx,
-                              packagingCost = it.packagingCost,
-                              operationalCost = it.operationalCost,
-                              returnReservePercent = it.returnReservePercent,
-                              targetAds = a,
+                              voucherCost = v,
                               targetAffiliatePercent = af,
-                              targetMarginDefault = targetMargin
+                              targetAds = a,
+                              otherCost = o,
+                              targetMarginPercent = targetMargin,
+                              targetProfitPerOrder = targetProfit
                           )
                       }
                   }
@@ -1103,13 +1346,13 @@ jobs:
                       .padding(16.dp)
               ) {
                   Text(
-                      text = "Simulator Fee & Biaya",
+                      text = "Simulator Biaya & SOT",
                       fontSize = 20.sp,
                       fontWeight = FontWeight.Bold,
                       color = Color(0xFF1E293B)
                   )
                   Text(
-                      text = "Pilih produk untuk menguji skenario perubahan harga atau admin.",
+                      text = "Uji skenario kenaikan fee admin, voucher, atau iklan terhadap profit toko.",
                       fontSize = 13.sp,
                       color = Color(0xFF64748B)
                   )
@@ -1156,10 +1399,32 @@ jobs:
                       OutlinedTextField(
                           value = simPriceText,
                           onValueChange = { simPriceText = it },
-                          label = { Text("Harga Simulasi (Rp)") },
+                          label = { Text("Harga Jual Simulasi (Rp)") },
                           keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                          modifier = Modifier.fillMaxWidth()
+                          modifier = Modifier.fillMaxWidth(),
+                          singleLine = true
                       )
+
+                      Spacer(Modifier.height(8.dp))
+
+                      Row(modifier = Modifier.fillMaxWidth()) {
+                          OutlinedTextField(
+                              value = simCogsText,
+                              onValueChange = { simCogsText = it },
+                              label = { Text("HPP (Rp)") },
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                              modifier = Modifier.weight(1f).padding(end = 4.dp),
+                              singleLine = true
+                          )
+                          OutlinedTextField(
+                              value = simPackText,
+                              onValueChange = { simPackText = it },
+                              label = { Text("Packaging (Rp)") },
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                              modifier = Modifier.weight(1f).padding(start = 4.dp),
+                              singleLine = true
+                          )
+                      }
 
                       Spacer(Modifier.height(8.dp))
 
@@ -1167,16 +1432,39 @@ jobs:
                           OutlinedTextField(
                               value = simFeeText,
                               onValueChange = { simFeeText = it },
-                              label = { Text("Fee (%)") },
+                              label = { Text("Marketplace Fee (%)") },
                               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                              modifier = Modifier.weight(1f).padding(end = 4.dp)
+                              modifier = Modifier.weight(1f).padding(end = 4.dp),
+                              singleLine = true
                           )
                           OutlinedTextField(
                               value = simFixedText,
                               onValueChange = { simFixedText = it },
                               label = { Text("Fixed Fee (Rp)") },
                               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f).padding(start = 4.dp)
+                              modifier = Modifier.weight(1f).padding(start = 4.dp),
+                              singleLine = true
+                          )
+                      }
+
+                      Spacer(Modifier.height(8.dp))
+
+                      Row(modifier = Modifier.fillMaxWidth()) {
+                          OutlinedTextField(
+                              value = simVoucherText,
+                              onValueChange = { simVoucherText = it },
+                              label = { Text("Voucher (Rp)") },
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                              modifier = Modifier.weight(1f).padding(end = 4.dp),
+                              singleLine = true
+                          )
+                          OutlinedTextField(
+                              value = simAffText,
+                              onValueChange = { simAffText = it },
+                              label = { Text("Affiliate (%)") },
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                              modifier = Modifier.weight(1f).padding(start = 4.dp),
+                              singleLine = true
                           )
                       }
 
@@ -1186,16 +1474,18 @@ jobs:
                           OutlinedTextField(
                               value = simAdsText,
                               onValueChange = { simAdsText = it },
-                              label = { Text("Iklan (Rp)") },
+                              label = { Text("Iklan / Order (Rp)") },
                               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                              modifier = Modifier.weight(1f).padding(end = 4.dp)
+                              modifier = Modifier.weight(1f).padding(end = 4.dp),
+                              singleLine = true
                           )
                           OutlinedTextField(
-                              value = simAffPercentText,
-                              onValueChange = { simAffPercentText = it },
-                              label = { Text("Affiliate (%)") },
-                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                              modifier = Modifier.weight(1f).padding(start = 4.dp)
+                              value = simOtherText,
+                              onValueChange = { simOtherText = it },
+                              label = { Text("Other Cost (Rp)") },
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                              modifier = Modifier.weight(1f).padding(start = 4.dp),
+                              singleLine = true
                           )
                       }
 
@@ -1211,12 +1501,13 @@ jobs:
                                   Text("SEBELUM", fontSize = 11.sp, color = Color(0xFF64748B), fontWeight = FontWeight.Bold)
                                   Spacer(Modifier.height(4.dp))
                                   Text(
-                                      beforeResult?.let { ProfitEngine.formatRupiah(it.netProfit) } ?: "-",
+                                      beforeResult?.let { ProfitEngine.formatRupiah(it.profitPerOrder) } ?: "-",
                                       fontWeight = FontWeight.Bold,
                                       fontSize = 15.sp
                                   )
                                   Text("Margin: ${beforeResult?.marginPercent ?: 0}%", fontSize = 12.sp, color = Color(0xFF64748B))
-                                  Text("Status: ${beforeResult?.status ?: "-"}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                  Text("Status: ${beforeResult?.status ?: "-"}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                  Text("Total: ${beforeResult?.let { ProfitEngine.formatRupiah(it.totalNetProfit) } ?: "-"}", fontSize = 11.sp, color = Color(0xFF64748B))
                               }
                           }
 
@@ -1229,13 +1520,14 @@ jobs:
                                   Text("SESUDAH", fontSize = 11.sp, color = Color(0xFF2E7D32), fontWeight = FontWeight.Bold)
                                   Spacer(Modifier.height(4.dp))
                                   Text(
-                                      afterResult?.let { ProfitEngine.formatRupiah(it.netProfit) } ?: "-",
+                                      afterResult?.let { ProfitEngine.formatRupiah(it.profitPerOrder) } ?: "-",
                                       fontWeight = FontWeight.Bold,
                                       fontSize = 15.sp,
                                       color = Color(0xFF1B5E20)
                                   )
                                   Text("Margin: ${afterResult?.marginPercent ?: 0}%", fontSize = 12.sp, color = Color(0xFF2E7D32))
-                                  Text("Status: ${afterResult?.status ?: "-"}", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1B5E20))
+                                  Text("Status: ${afterResult?.status ?: "-"}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF1B5E20))
+                                  Text("Total: ${afterResult?.let { ProfitEngine.formatRupiah(it.totalNetProfit) } ?: "-"}", fontSize = 11.sp, color = Color(0xFF2E7D32))
                               }
                           }
                       }
@@ -1243,7 +1535,7 @@ jobs:
                       Spacer(Modifier.height(14.dp))
 
                       val diffProfit = if (beforeResult != null && afterResult != null) {
-                          afterResult!!.netProfit.subtract(beforeResult.netProfit)
+                          afterResult!!.profitPerOrder.subtract(beforeResult.profitPerOrder)
                       } else {
                           BigDecimal.ZERO
                       }
@@ -1256,11 +1548,11 @@ jobs:
                           shape = RoundedCornerShape(12.dp)
                       ) {
                           Column(modifier = Modifier.padding(14.dp)) {
-                              Text("DAMPAK PERUBAHAN", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                              Text("DAMPAK PERUBAHAN PER ORDER", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
                               Spacer(Modifier.height(4.dp))
                               val sign = if (diffProfit > BigDecimal.ZERO) "+" else ""
                               Text(
-                                  "Selisih Net Profit: $sign${ProfitEngine.formatRupiah(diffProfit)}",
+                                  "Selisih Profit / Order: $sign${ProfitEngine.formatRupiah(diffProfit)}",
                                   fontSize = 16.sp,
                                   fontWeight = FontWeight.Bold,
                                   color = if (diffProfit >= BigDecimal.ZERO) Color(0xFF2E7D32) else Color(0xFFC62828)
@@ -1276,7 +1568,8 @@ jobs:
           @Composable
           fun ProdukScreen(
               products: List<ProductItem>,
-              targetMargin: Double,
+              targetMargin: BigDecimal,
+              targetProfit: BigDecimal,
               onDeleteProduct: (String) -> Unit,
               onUpdateProduct: (ProductItem) -> Unit
           ) {
@@ -1284,20 +1577,29 @@ jobs:
               var editingProduct by remember { mutableStateOf<ProductItem?>(null) }
               var productToDelete by remember { mutableStateOf<ProductItem?>(null) }
 
-              val calculatedList = remember(products, targetMargin) {
+              val calculatedList = remember(products, targetMargin, targetProfit) {
                   products.map { p ->
                       p to ProfitEngine.calculate(
-                          p.sellingPrice, p.cogs, p.marketplaceFeePercent,
-                          p.fixedFee, p.packagingCost, p.operationalCost,
-                          p.returnReservePercent, p.targetAds, p.targetAffiliatePercent, targetMargin
+                          sellingPrice = p.sellingPrice,
+                          unitsSold = p.unitsSold,
+                          cogs = p.cogs,
+                          packagingCost = p.packagingCost,
+                          marketplaceFeePercent = p.marketplaceFeePercent,
+                          fixedFee = p.fixedFee,
+                          voucherCost = p.voucherCost,
+                          targetAffiliatePercent = p.targetAffiliatePercent,
+                          targetAds = p.targetAds,
+                          otherCost = p.otherCost,
+                          targetMarginPercent = targetMargin,
+                          targetProfitPerOrder = targetProfit
                       )
                   }
               }
 
               val filteredList = calculatedList.filter { pair ->
                   when (selectedFilter) {
-                      "SEHAT" -> pair.second.status == "SEHAT"
-                      "TIPIS" -> pair.second.status == "TIPIS"
+                      "SEHAT" -> pair.second.status == "PROFIT SEHAT"
+                      "TIPIS" -> pair.second.status == "PROFIT TIPIS"
                       "BONCOS" -> pair.second.status == "BONCOS"
                       else -> true
                   }
@@ -1321,10 +1623,7 @@ jobs:
                           val isSelected = selectedFilter == filter
                           Button(
                               onClick = { selectedFilter = filter },
-                              modifier = Modifier
-                                  .weight(1f)
-                                  .padding(horizontal = 2.dp)
-                                  .height(36.dp),
+                              modifier = Modifier.weight(1f).padding(horizontal = 2.dp).height(36.dp),
                               colors = ButtonDefaults.buttonColors(
                                   containerColor = if (isSelected) Color(0xFF006D5B) else Color(0xFFE2E8F0)
                               ),
@@ -1343,10 +1642,7 @@ jobs:
                   Spacer(Modifier.height(12.dp))
 
                   if (filteredList.isEmpty()) {
-                      Box(
-                          modifier = Modifier.fillMaxSize(),
-                          contentAlignment = Alignment.Center
-                      ) {
+                      Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                           Text("Tidak ada produk dalam kategori ini.", color = Color(0xFF94A3B8))
                       }
                   } else {
@@ -1356,15 +1652,13 @@ jobs:
                       ) {
                           items(filteredList, key = { it.first.id }) { (product, calc) ->
                               val (badgeBg, badgeText) = when (calc.status) {
-                                  "SEHAT" -> Color(0xFF2E7D32) to "SEHAT"
-                                  "TIPIS" -> Color(0xFFE65100) to "TIPIS"
+                                  "PROFIT SEHAT" -> Color(0xFF2E7D32) to "SEHAT"
+                                  "PROFIT TIPIS" -> Color(0xFFE65100) to "TIPIS"
                                   else -> Color(0xFFC62828) to "BONCOS"
                               }
 
                               Card(
-                                  modifier = Modifier
-                                      .fillMaxWidth()
-                                      .padding(vertical = 6.dp),
+                                  modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
                                   colors = CardDefaults.cardColors(containerColor = Color.White),
                                   elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                                   shape = RoundedCornerShape(12.dp)
@@ -1402,10 +1696,10 @@ jobs:
                                       )
                                       Spacer(Modifier.height(2.dp))
                                       Text(
-                                          "Net Profit: ${ProfitEngine.formatRupiah(calc.netProfit)}",
-                                          fontSize = 14.sp,
+                                          "Profit/Order: ${ProfitEngine.formatRupiah(calc.profitPerOrder)} | Total (${product.unitsSold} Unit): ${ProfitEngine.formatRupiah(calc.totalNetProfit)}",
+                                          fontSize = 13.sp,
                                           fontWeight = FontWeight.Bold,
-                                          color = if (calc.netProfit >= BigDecimal.ZERO) Color(0xFF2E7D32) else Color(0xFFC62828)
+                                          color = if (calc.profitPerOrder >= BigDecimal.ZERO) Color(0xFF2E7D32) else Color(0xFFC62828)
                                       )
 
                                       Spacer(Modifier.height(6.dp))
@@ -1419,9 +1713,7 @@ jobs:
                                               color = Color(0xFF006D5B),
                                               fontSize = 12.sp,
                                               fontWeight = FontWeight.Bold,
-                                              modifier = Modifier
-                                                  .clickable { editingProduct = product }
-                                                  .padding(8.dp)
+                                              modifier = Modifier.clickable { editingProduct = product }.padding(8.dp)
                                           )
                                           Spacer(Modifier.width(8.dp))
                                           Text(
@@ -1429,9 +1721,7 @@ jobs:
                                               color = Color(0xFFC62828),
                                               fontSize = 12.sp,
                                               fontWeight = FontWeight.Bold,
-                                              modifier = Modifier
-                                                  .clickable { productToDelete = product }
-                                                  .padding(8.dp)
+                                              modifier = Modifier.clickable { productToDelete = product }.padding(8.dp)
                                           )
                                       }
                                   }
@@ -1441,7 +1731,6 @@ jobs:
                   }
               }
 
-              // DIALOG KONFIRMASI HAPUS
               productToDelete?.let { prod ->
                   AlertDialog(
                       onDismissRequest = { productToDelete = null },
@@ -1466,87 +1755,71 @@ jobs:
                   )
               }
 
-              // DIALOG EDIT PRODUK
               editingProduct?.let { prod ->
                   var editName by remember { mutableStateOf(prod.name) }
-                  var editPrice by remember { mutableStateOf(prod.sellingPrice.toLong().toString()) }
-                  var editCogs by remember { mutableStateOf(prod.cogs.toLong().toString()) }
-                  var editFee by remember { mutableStateOf(prod.marketplaceFeePercent.toString()) }
-                  var editAds by remember { mutableStateOf(prod.targetAds.toLong().toString()) }
-                  var editAff by remember { mutableStateOf(prod.targetAffiliatePercent.toString()) }
+                  var editPrice by remember { mutableStateOf(ProfitEngine.formatNumber(prod.sellingPrice)) }
+                  var editUnits by remember { mutableStateOf(prod.unitsSold.toString()) }
+                  var editCogs by remember { mutableStateOf(ProfitEngine.formatNumber(prod.cogs)) }
+                  var editPack by remember { mutableStateOf(ProfitEngine.formatNumber(prod.packagingCost)) }
+                  var editFee by remember { mutableStateOf(ProfitEngine.formatDecimal(prod.marketplaceFeePercent)) }
+                  var editFixed by remember { mutableStateOf(ProfitEngine.formatNumber(prod.fixedFee)) }
+                  var editVoucher by remember { mutableStateOf(ProfitEngine.formatNumber(prod.voucherCost)) }
+                  var editAff by remember { mutableStateOf(ProfitEngine.formatDecimal(prod.targetAffiliatePercent)) }
+                  var editAds by remember { mutableStateOf(ProfitEngine.formatNumber(prod.targetAds)) }
+                  var editOther by remember { mutableStateOf(ProfitEngine.formatNumber(prod.otherCost)) }
 
                   AlertDialog(
                       onDismissRequest = { editingProduct = null },
-                      title = { Text("Edit Produk") },
+                      title = { Text("Edit Produk SOT") },
                       text = {
                           Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                              OutlinedTextField(
-                                  value = editName,
-                                  onValueChange = { editName = it },
-                                  label = { Text("Nama Produk") },
-                                  modifier = Modifier.fillMaxWidth()
-                              )
-                              Spacer(Modifier.height(6.dp))
-                              OutlinedTextField(
-                                  value = editPrice,
-                                  onValueChange = { editPrice = it },
-                                  label = { Text("Harga Jual (Rp)") },
-                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                  modifier = Modifier.fillMaxWidth()
-                              )
-                              Spacer(Modifier.height(6.dp))
-                              OutlinedTextField(
-                                  value = editCogs,
-                                  onValueChange = { editCogs = it },
-                                  label = { Text("HPP / Modal (Rp)") },
-                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                  modifier = Modifier.fillMaxWidth()
-                              )
-                              Spacer(Modifier.height(6.dp))
-                              OutlinedTextField(
-                                  value = editFee,
-                                  onValueChange = { editFee = it },
-                                  label = { Text("Fee Marketplace (%)") },
-                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                  modifier = Modifier.fillMaxWidth()
-                              )
-                              Spacer(Modifier.height(6.dp))
-                              OutlinedTextField(
-                                  value = editAds,
-                                  onValueChange = { editAds = it },
-                                  label = { Text("Iklan / Order (Rp)") },
-                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                                  modifier = Modifier.fillMaxWidth()
-                              )
-                              Spacer(Modifier.height(6.dp))
-                              OutlinedTextField(
-                                  value = editAff,
-                                  onValueChange = { editAff = it },
-                                  label = { Text("Affiliate (%)") },
-                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                                  modifier = Modifier.fillMaxWidth()
-                              )
+                              OutlinedTextField(value = editName, onValueChange = { editName = it }, label = { Text("Nama Produk") }, modifier = Modifier.fillMaxWidth())
+                              Spacer(Modifier.height(4.dp))
+                              Row {
+                                  OutlinedTextField(value = editPrice, onValueChange = { editPrice = it }, label = { Text("Harga Jual") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1.3f).padding(end = 4.dp))
+                                  OutlinedTextField(value = editUnits, onValueChange = { editUnits = it }, label = { Text("Unit") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(0.7f).padding(start = 4.dp))
+                              }
+                              Spacer(Modifier.height(4.dp))
+                              Row {
+                                  OutlinedTextField(value = editCogs, onValueChange = { editCogs = it }, label = { Text("HPP") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f).padding(end = 4.dp))
+                                  OutlinedTextField(value = editPack, onValueChange = { editPack = it }, label = { Text("Packaging") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f).padding(start = 4.dp))
+                              }
+                              Spacer(Modifier.height(4.dp))
+                              Row {
+                                  OutlinedTextField(value = editFee, onValueChange = { editFee = it }, label = { Text("Fee (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f).padding(end = 4.dp))
+                                  OutlinedTextField(value = editFixed, onValueChange = { editFixed = it }, label = { Text("Fixed Fee") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f).padding(start = 4.dp))
+                              }
+                              Spacer(Modifier.height(4.dp))
+                              Row {
+                                  OutlinedTextField(value = editVoucher, onValueChange = { editVoucher = it }, label = { Text("Voucher (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f).padding(end = 4.dp))
+                                  OutlinedTextField(value = editAff, onValueChange = { editAff = it }, label = { Text("Affiliate (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.weight(1f).padding(start = 4.dp))
+                              }
+                              Spacer(Modifier.height(4.dp))
+                              Row {
+                                  OutlinedTextField(value = editAds, onValueChange = { editAds = it }, label = { Text("Iklan (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f).padding(end = 4.dp))
+                                  OutlinedTextField(value = editOther, onValueChange = { editOther = it }, label = { Text("Other (Rp)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), modifier = Modifier.weight(1f).padding(start = 4.dp))
+                              }
                           }
                       },
                       confirmButton = {
                           Button(
                               onClick = {
-                                  val p = ProfitEngine.parseNominal(editPrice)
-                                  val c = ProfitEngine.parseNominal(editCogs)
-                                  if (editName.isNotBlank() && p > 0.0) {
+                                  val p = ProfitEngine.parseBigDecimal(editPrice)
+                                  if (editName.isNotBlank() && p.compareTo(BigDecimal.ZERO) > 0) {
                                       onUpdateProduct(
                                           ProductItem(
                                               id = prod.id,
                                               name = editName.trim(),
                                               sellingPrice = p,
-                                              cogs = c,
+                                              unitsSold = ProfitEngine.parseUnits(editUnits),
+                                              cogs = ProfitEngine.parseBigDecimal(editCogs),
+                                              packagingCost = ProfitEngine.parseBigDecimal(editPack),
                                               marketplaceFeePercent = ProfitEngine.parsePercent(editFee),
-                                              fixedFee = prod.fixedFee,
-                                              packagingCost = prod.packagingCost,
-                                              operationalCost = prod.operationalCost,
-                                              returnReservePercent = prod.returnReservePercent,
-                                              targetAds = ProfitEngine.parseNominal(editAds),
-                                              targetAffiliatePercent = ProfitEngine.parsePercent(editAff)
+                                              fixedFee = ProfitEngine.parseBigDecimal(editFixed),
+                                              voucherCost = ProfitEngine.parseBigDecimal(editVoucher),
+                                              targetAffiliatePercent = ProfitEngine.parsePercent(editAff),
+                                              targetAds = ProfitEngine.parseBigDecimal(editAds),
+                                              otherCost = ProfitEngine.parseBigDecimal(editOther)
                                           )
                                       )
                                       editingProduct = null
@@ -1568,12 +1841,15 @@ jobs:
 
           @Composable
           fun SettingScreen(
-              targetMargin: Double,
-              onSaveTargetMargin: (Double) -> Unit,
+              targetMargin: BigDecimal,
+              targetProfit: BigDecimal,
+              onSaveTargetMargin: (BigDecimal) -> Unit,
+              onSaveTargetProfit: (BigDecimal) -> Unit,
               repository: ProfitRepository,
               onDataRestored: () -> Unit
           ) {
-              var targetInput by remember(targetMargin) { mutableStateOf(targetMargin.toString()) }
+              var marginInput by remember(targetMargin) { mutableStateOf(ProfitEngine.formatDecimal(targetMargin)) }
+              var profitInput by remember(targetProfit) { mutableStateOf(ProfitEngine.formatNumber(targetProfit)) }
               var showBackupDialog by remember { mutableStateOf(false) }
               var backupJsonText by remember { mutableStateOf("") }
               val clipboardManager = LocalClipboardManager.current
@@ -1600,58 +1876,17 @@ jobs:
                   ) {
                       Column(modifier = Modifier.padding(16.dp)) {
                           Text(
-                              "Panduan Singkat 3 Langkah",
+                              "Panduan Singkat 3 Langkah SOT",
                               fontWeight = FontWeight.Bold,
                               fontSize = 15.sp,
                               color = Color(0xFF1B5E20)
                           )
                           Spacer(Modifier.height(8.dp))
-                          Text("1. Masukkan produk jagoan Anda di menu Hitung beserta HPP & potongan admin.", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                          Text("1. Input produk di menu Hitung beserta modal, admin fee, voucher, dan biaya lainnya.", fontSize = 12.sp, color = Color(0xFF2E7D32))
                           Spacer(Modifier.height(4.dp))
-                          Text("2. Cek Batas Aman Iklan & BEP ROAS sebelum beriklan atau membagi komisi affiliate.", fontSize = 12.sp, color = Color(0xFF2E7D32))
+                          Text("2. Perhatikan Harga Minimum dan Batas Aman Iklan (Max Ads) yang mengunci target profit Anda.", fontSize = 12.sp, color = Color(0xFF2E7D32))
                           Spacer(Modifier.height(4.dp))
-                          Text("3. Gunakan menu Simulasi untuk menguji risiko jika ada kenaikan biaya admin dari marketplace.", fontSize = 12.sp, color = Color(0xFF2E7D32))
-                      }
-                  }
-
-                  Spacer(Modifier.height(14.dp))
-
-                  Card(
-                      modifier = Modifier.fillMaxWidth(),
-                      colors = CardDefaults.cardColors(containerColor = Color(0xFFF8FAFC)),
-                      shape = RoundedCornerShape(12.dp)
-                  ) {
-                      Column(modifier = Modifier.padding(16.dp)) {
-                          Text(
-                              "Tanya Jawab & Istilah (Q&A)",
-                              fontWeight = FontWeight.Bold,
-                              fontSize = 15.sp,
-                              color = Color(0xFF1E293B)
-                          )
-                          Spacer(Modifier.height(10.dp))
-
-                          Text("• BEP ROAS Minimum:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                          Text(
-                              "Nilai impas efektivitas iklan Anda. Jika tertulis 3.0x, maka performa iklan toko Anda minimal harus 3.0x agar tidak rugi.",
-                              fontSize = 12.sp,
-                              color = Color(0xFF475569)
-                          )
-                          Spacer(Modifier.height(8.dp))
-
-                          Text("• Batas Aman Iklan (Max Ads):", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                          Text(
-                              "Biaya iklan maksimal per order yang boleh dikeluarkan sebelum toko mengalami kerugian bersih.",
-                              fontSize = 12.sp,
-                              color = Color(0xFF475569)
-                          )
-                          Spacer(Modifier.height(8.dp))
-
-                          Text("• Keamanan Data & Offline:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                          Text(
-                              "Aplikasi 100% offline. Semua data tersimpan aman di internal HP tanpa dikirim ke server luar manapun.",
-                              fontSize = 12.sp,
-                              color = Color(0xFF475569)
-                          )
+                          Text("3. Gunakan menu Simulasi jika marketplace menaikkan komisi agar toko tidak boncos.", fontSize = 12.sp, color = Color(0xFF2E7D32))
                       }
                   }
 
@@ -1663,35 +1898,45 @@ jobs:
                       shape = RoundedCornerShape(12.dp)
                   ) {
                       Column(modifier = Modifier.padding(16.dp)) {
-                          Text(
-                              "Target Margin Default (%)",
-                              fontWeight = FontWeight.SemiBold,
-                              fontSize = 14.sp,
-                              color = Color(0xFF334155)
-                          )
+                          Text("Target Margin & Profit SOT", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color(0xFF334155))
                           Spacer(Modifier.height(8.dp))
+
                           OutlinedTextField(
-                              value = targetInput,
-                              onValueChange = { targetInput = it },
+                              value = marginInput,
+                              onValueChange = { marginInput = it },
+                              label = { Text("Target Margin Default (%)") },
                               keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                               modifier = Modifier.fillMaxWidth(),
                               singleLine = true
                           )
+                          Spacer(Modifier.height(8.dp))
+
+                          OutlinedTextField(
+                              value = profitInput,
+                              onValueChange = { profitInput = it },
+                              label = { Text("Target Profit / Order (Rp) [Untuk Safe Limits]") },
+                              keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                              modifier = Modifier.fillMaxWidth(),
+                              singleLine = true
+                          )
+
                           Spacer(Modifier.height(12.dp))
                           Button(
                               onClick = {
-                                  val parsed = ProfitEngine.parsePercent(targetInput)
-                                  if (parsed >= 0.0) {
-                                      onSaveTargetMargin(parsed)
-                                      Toast.makeText(context, "Target margin disimpan!", Toast.LENGTH_SHORT).show()
+                                  val pMargin = ProfitEngine.parsePercent(marginInput)
+                                  val pProfit = ProfitEngine.parseBigDecimal(profitInput)
+                                  if (pMargin.compareTo(BigDecimal.ZERO) >= 0 && pProfit.compareTo(BigDecimal.ZERO) >= 0) {
+                                      onSaveTargetMargin(pMargin)
+                                      onSaveTargetProfit(pProfit)
+                                      Toast.makeText(context, "Target Margin & Profit berhasil disimpan!", Toast.LENGTH_SHORT).show()
                                   } else {
-                                      Toast.makeText(context, "Masukkan angka margin yang valid!", Toast.LENGTH_SHORT).show()
+                                      Toast.makeText(context, "Masukkan nilai target yang valid!", Toast.LENGTH_SHORT).show()
                                   }
                               },
                               colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B)),
                               shape = RoundedCornerShape(8.dp)
                           ) {
-                              Text("Simpan Target")
+                              Text("Simpan Target SOT")
                           }
                       }
                   }
@@ -1704,12 +1949,7 @@ jobs:
                       shape = RoundedCornerShape(12.dp)
                   ) {
                       Column(modifier = Modifier.padding(16.dp)) {
-                          Text(
-                              "Backup & Restore (Offline)",
-                              fontWeight = FontWeight.SemiBold,
-                              fontSize = 14.sp,
-                              color = Color(0xFF334155)
-                          )
+                          Text("Backup & Restore (Offline)", fontWeight = FontWeight.SemiBold, fontSize = 14.sp, color = Color(0xFF334155))
                           Spacer(Modifier.height(12.dp))
                           Row(modifier = Modifier.fillMaxWidth()) {
                               Button(
@@ -1717,9 +1957,7 @@ jobs:
                                       backupJsonText = repository.getRawJson()
                                       showBackupDialog = true
                                   },
-                                  modifier = Modifier
-                                      .weight(1f)
-                                      .padding(end = 4.dp),
+                                  modifier = Modifier.weight(1f).padding(end = 4.dp),
                                   colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B)),
                                   shape = RoundedCornerShape(8.dp)
                               ) {
@@ -1730,9 +1968,7 @@ jobs:
                                       backupJsonText = ""
                                       showBackupDialog = true
                                   },
-                                  modifier = Modifier
-                                      .weight(1f)
-                                      .padding(start = 4.dp),
+                                  modifier = Modifier.weight(1f).padding(start = 4.dp),
                                   shape = RoundedCornerShape(8.dp)
                               ) {
                                   Text("Restore Data", fontSize = 13.sp, color = Color(0xFF006D5B))
@@ -1749,18 +1985,9 @@ jobs:
                       shape = RoundedCornerShape(12.dp)
                   ) {
                       Column(modifier = Modifier.padding(16.dp)) {
-                          Text(
-                              "Profit Control V1.0.5",
-                              fontWeight = FontWeight.Bold,
-                              fontSize = 14.sp,
-                              color = Color(0xFF1E293B)
-                          )
+                          Text("Profit Control V1.0.6 (Production Release)", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color(0xFF1E293B))
                           Spacer(Modifier.height(4.dp))
-                          Text(
-                              "Semua data tersimpan otomatis di memori internal HP Anda secara offline.",
-                              fontSize = 12.sp,
-                              color = Color(0xFF64748B)
-                          )
+                          Text("100% Offline. Dilengkapi kalkulator Harga Minimum dan Safe Limits sesuai SOT.", fontSize = 12.sp, color = Color(0xFF64748B))
                       }
                   }
 
@@ -1782,9 +2009,7 @@ jobs:
                               OutlinedTextField(
                                   value = backupJsonText,
                                   onValueChange = { backupJsonText = it },
-                                  modifier = Modifier
-                                  .fillMaxWidth()
-                                  .height(150.dp),
+                                  modifier = Modifier.fillMaxWidth().height(150.dp),
                                   textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
                               )
                               Spacer(Modifier.height(6.dp))
@@ -1827,13 +2052,22 @@ jobs:
           }
           EOF
 
-      - name: Build Android Debug APK
+      - name: Build Android Production Signed Release APK
         run: |
           chmod +x gradlew || true
-          gradle assembleDebug --stacktrace
+          gradle assembleRelease --stacktrace
 
-      - name: Upload APK Artifact
+      - name: Verify Production Release APK
+        run: |
+          APK_PATH="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_PATH" ]; then
+            echo "ERROR: Release APK not found at $APK_PATH"
+            exit 1
+          fi
+          echo "SUCCESS: Production Release APK built successfully at $APK_PATH"
+
+      - name: Upload Production Release APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ProfitControl-V1.0.5-ProductionRelease
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: ProfitControl-V1.0.6-ProductionRelease
+          path: app/build/outputs/apk/release/app-release.apk
