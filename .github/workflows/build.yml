@@ -224,10 +224,8 @@ jobs:
           import androidx.compose.foundation.text.KeyboardOptions
           import androidx.compose.foundation.verticalScroll
           import androidx.compose.material.icons.Icons
-          import androidx.compose.material.icons.filled.Add
           import androidx.compose.material.icons.filled.Home
           import androidx.compose.material.icons.filled.List
-          import androidx.compose.material.icons.filled.PlayArrow
           import androidx.compose.material.icons.filled.Settings
           import androidx.compose.material3.*
           import androidx.compose.runtime.*
@@ -474,12 +472,12 @@ jobs:
               )
           }
 
-          enum class NavTab(val title: String, val icon: @Composable () -> Unit) {
-              HOME("Home", { Icon(Icons.Default.Home, contentDescription = "Home") }),
-              HITUNG("Hitung", { Icon(Icons.Default.Add, contentDescription = "Hitung") }),
-              SIMULASI("Simulasi", { Icon(Icons.Default.PlayArrow, contentDescription = "Simulasi") }),
-              PRODUK("Produk", { Icon(Icons.Default.List, contentDescription = "Produk") }),
-              SETTING("Setting", { Icon(Icons.Default.Settings, contentDescription = "Setting") })
+          enum class NavTab(val title: String) {
+              HOME("Home"),
+              HITUNG("Hitung"),
+              SIMULASI("Simulasi"),
+              PRODUK("Produk"),
+              SETTING("Setting")
           }
 
           @Composable
@@ -487,6 +485,8 @@ jobs:
               var currentTab by remember { mutableStateOf(NavTab.HOME) }
               var products by remember { mutableStateOf(repository.loadProducts()) }
               var targetMargin by remember { mutableDoubleStateOf(repository.getTargetMargin()) }
+
+              val tabs = remember { listOf(NavTab.HOME, NavTab.HITUNG, NavTab.SIMULASI, NavTab.PRODUK, NavTab.SETTING) }
 
               Scaffold(
                   topBar = {
@@ -514,11 +514,19 @@ jobs:
                           containerColor = Color.White,
                           tonalElevation = 6.dp
                       ) {
-                          NavTab.values().forEach { tab ->
+                          tabs.forEach { tab ->
                               NavigationBarItem(
                                   selected = currentTab == tab,
                                   onClick = { currentTab = tab },
-                                  icon = tab.icon,
+                                  icon = {
+                                      when (tab) {
+                                          NavTab.HOME -> Icon(Icons.Default.Home, contentDescription = "Home")
+                                          NavTab.HITUNG -> Text("+", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = if (currentTab == tab) Color(0xFF006D5B) else Color(0xFF757575))
+                                          NavTab.SIMULASI -> Text("S", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = if (currentTab == tab) Color(0xFF006D5B) else Color(0xFF757575))
+                                          NavTab.PRODUK -> Icon(Icons.Default.List, contentDescription = "Produk")
+                                          NavTab.SETTING -> Icon(Icons.Default.Settings, contentDescription = "Setting")
+                                      }
+                                  },
                                   label = {
                                       Text(
                                           text = tab.title,
@@ -1498,11 +1506,16 @@ jobs:
                                   val c = ProfitEngine.parseNominal(editCogs)
                                   if (editName.isNotBlank() && p > 0.0) {
                                       onUpdateProduct(
-                                          prod.copy(
+                                          ProductItem(
+                                              id = prod.id,
                                               name = editName.trim(),
                                               sellingPrice = p,
                                               cogs = c,
                                               marketplaceFeePercent = ProfitEngine.parsePercent(editFee),
+                                              fixedFee = prod.fixedFee,
+                                              packagingCost = prod.packagingCost,
+                                              operationalCost = prod.operationalCost,
+                                              returnReservePercent = prod.returnReservePercent,
                                               targetAds = ProfitEngine.parseNominal(editAds),
                                               targetAffiliatePercent = ProfitEngine.parsePercent(editAff)
                                           )
@@ -1536,10 +1549,6 @@ jobs:
               var backupJsonText by remember { mutableStateOf("") }
               val clipboardManager = LocalClipboardManager.current
               val context = LocalContext.current
-
-              var openQ1 by remember { mutableStateOf(false) }
-              var openQ2 by remember { mutableStateOf(false) }
-              var openQ3 by remember { mutableStateOf(false) }
 
               Column(
                   modifier = Modifier
@@ -1592,56 +1601,28 @@ jobs:
                           )
                           Spacer(Modifier.height(10.dp))
 
-                          Column(modifier = Modifier.fillMaxWidth().clickable { openQ1 = !openQ1 }) {
-                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                  Text("Apa itu BEP ROAS Minimum?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                                  Text(if (openQ1) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
-                              }
-                              if (openQ1) {
-                                  Text(
-                                      "Nilai efektivitas balik modal iklan Anda. Jika BEP ROAS tertulis 3.0x, maka hasil iklan minimal harus 3.0x. Bila di bawah itu, iklan Anda sedang rugi.",
-                                      fontSize = 12.sp,
-                                      color = Color(0xFF475569),
-                                      modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
-                                  )
-                              }
-                          }
-                          Spacer(Modifier.height(8.dp))
-                          Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE2E8F0)))
+                          Text("• BEP ROAS Minimum:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF006D5B))
+                          Text(
+                              "Nilai impas efektivitas iklan Anda. Jika tertulis 3.0x, maka performa iklan toko Anda minimal harus 3.0x agar tidak rugi.",
+                              fontSize = 12.sp,
+                              color = Color(0xFF475569)
+                          )
                           Spacer(Modifier.height(8.dp))
 
-                          Column(modifier = Modifier.fillMaxWidth().clickable { openQ2 = !openQ2 }) {
-                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                  Text("Batas Aman Iklan (Max Ads)?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                                  Text(if (openQ2) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
-                              }
-                              if (openQ2) {
-                                  Text(
-                                      "Biaya iklan maksimal per pesanan yang boleh dikeluarkan sebelum produk mengalami kerugian bersih.",
-                                      fontSize = 12.sp,
-                                      color = Color(0xFF475569),
-                                      modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
-                                  )
-                              }
-                          }
-                          Spacer(Modifier.height(8.dp))
-                          Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0xFFE2E8F0)))
+                          Text("• Batas Aman Iklan (Max Ads):", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF006D5B))
+                          Text(
+                              "Biaya iklan maksimal per order yang boleh dikeluarkan sebelum toko mengalami kerugian bersih.",
+                              fontSize = 12.sp,
+                              color = Color(0xFF475569)
+                          )
                           Spacer(Modifier.height(8.dp))
 
-                          Column(modifier = Modifier.fillMaxWidth().clickable { openQ3 = !openQ3 }) {
-                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                  Text("Apakah data aman & butuh internet?", fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = Color(0xFF006D5B))
-                                  Text(if (openQ3) "▲" else "▼", fontSize = 11.sp, color = Color(0xFF006D5B))
-                              }
-                              if (openQ3) {
-                                  Text(
-                                      "Aplikasi 100% offline. Semua data tersimpan aman di HP Anda sendiri tanpa dikirim ke server luar manapun.",
-                                      fontSize = 12.sp,
-                                      color = Color(0xFF475569),
-                                      modifier = Modifier.padding(top = 4.dp, bottom = 6.dp)
-                                  )
-                              }
-                          }
+                          Text("• Keamanan Data & Offline:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF006D5B))
+                          Text(
+                              "Aplikasi 100% offline. Semua data tersimpan aman di internal HP tanpa dikirim ke server luar manapun.",
+                              fontSize = 12.sp,
+                              color = Color(0xFF475569)
+                          )
                       }
                   }
 
@@ -1773,8 +1754,8 @@ jobs:
                                   value = backupJsonText,
                                   onValueChange = { backupJsonText = it },
                                   modifier = Modifier
-                                  .fillMaxWidth()
-                                  .height(150.dp),
+                                      .fillMaxWidth()
+                                      .height(150.dp),
                                   textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
                               )
                               Spacer(Modifier.height(6.dp))
