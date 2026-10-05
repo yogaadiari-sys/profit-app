@@ -28,10 +28,12 @@ jobs:
         with:
           gradle-version: '8.4'
 
-      - name: Generate Android Project Structure
+      - name: Generate Android Project Structure & Icons
         run: |
           mkdir -p app/src/main/java/com/profitcontrol/app
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
 
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=512m
@@ -79,8 +81,8 @@ jobs:
                   applicationId = "com.profitcontrol.app"
                   minSdk = 24
                   targetSdk = 34
-                  versionCode = 3
-                  versionName = "1.0.2"
+                  versionCode = 4
+                  versionName = "1.0.3"
 
                   testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
                   vectorDrawables {
@@ -132,14 +134,55 @@ jobs:
           }
           EOF
 
+          # BUAT ADAPTIVE ICON CUSTOM (PROFESIONAL FINANSIAL)
+          cat << 'EOF' > app/src/main/res/drawable/ic_launcher_background.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#005B4C"
+                  android:pathData="M0,0h108v108h-108z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/drawable/ic_launcher_foreground.xml
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="108dp"
+              android:height="108dp"
+              android:viewportWidth="108"
+              android:viewportHeight="108">
+              <path
+                  android:fillColor="#FFFFFF"
+                  android:pathData="M34,70 L42,70 L42,54 L34,54 Z M48,70 L56,70 L56,44 L48,44 Z M62,70 L70,70 L70,36 L62,36 Z M30,76 L76,76 L76,72 L30,72 Z"/>
+              <path
+                  android:strokeColor="#A7F3D0"
+                  android:strokeWidth="3.5"
+                  android:strokeLineCap="round"
+                  android:pathData="M34,48 L48,36 L60,44 L74,30"/>
+              <path
+                  android:fillColor="#A7F3D0"
+                  android:pathData="M70,30 L76,30 L76,36 Z"/>
+          </vector>
+          EOF
+
+          cat << 'EOF' > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@drawable/ic_launcher_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          EOF
+
           cat << 'EOF' > app/src/main/AndroidManifest.xml
           <?xml version="1.0" encoding="utf-8"?>
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <application
                   android:allowBackup="true"
-                  android:icon="@android:drawable/sym_def_app_icon"
+                  android:icon="@mipmap/ic_launcher"
                   android:label="Profit Control"
-                  android:roundIcon="@android:drawable/sym_def_app_icon"
+                  android:roundIcon="@mipmap/ic_launcher"
                   android:supportsRtl="true"
                   android:theme="@android:style/Theme.Material.Light.NoActionBar">
                   <activity
@@ -162,7 +205,7 @@ jobs:
           </resources>
           EOF
 
-      - name: Inject Source Code with UI, Affiliate %, & Scroll Fixes
+      - name: Inject Source Code with Edit Product & Sanitizer
         run: |
           cat << 'EOF' > app/src/main/java/com/profitcontrol/app/MainActivity.kt
           package com.profitcontrol.app
@@ -229,6 +272,17 @@ jobs:
           )
 
           object ProfitEngine {
+              // Fungsi pembersih titik ribuan (misal "50.000" dibersihkan jadi 50000.0)
+              fun parseNominal(text: String): Double {
+                  val cleaned = text.replace(".", "").replace(",", "").trim()
+                  return cleaned.toDoubleOrNull() ?: 0.0
+              }
+
+              fun parsePercent(text: String): Double {
+                  val cleaned = text.replace(",", ".").trim()
+                  return cleaned.toDoubleOrNull() ?: 0.0
+              }
+
               fun calculate(
                   sellingPrice: Double,
                   cogs: Double,
@@ -501,6 +555,11 @@ jobs:
                                   val updated = products.filterNot { it.id == id }
                                   products = updated
                                   repository.saveProducts(updated)
+                              },
+                              onUpdateProduct = { updatedProduct ->
+                                  val updated = products.map { if (it.id == updatedProduct.id) updatedProduct else it }
+                                  products = updated
+                                  repository.saveProducts(updated)
                               }
                           )
                           NavTab.SETTING -> SettingScreen(
@@ -681,15 +740,18 @@ jobs:
 
               val context = LocalContext.current
 
-              val price = priceText.toDoubleOrNull() ?: 0.0
-              val cogs = cogsText.toDoubleOrNull() ?: 0.0
-              val fee = feeText.toDoubleOrNull() ?: 0.0
-              val fixed = fixedText.toDoubleOrNull() ?: 0.0
-              val packing = packingText.toDoubleOrNull() ?: 0.0
-              val ops = opsText.toDoubleOrNull() ?: 0.0
-              val retur = returText.toDoubleOrNull() ?: 0.0
-              val ads = adsText.toDoubleOrNull() ?: 0.0
-              val affPercent = affPercentText.toDoubleOrNull() ?: 0.0
+              // Gunakan parser pembersih titik ribuan
+              val price = ProfitEngine.parseNominal(priceText)
+              val cogs = ProfitEngine.parseNominal(cogsText)
+              val fee = ProfitEngine.parsePercent(feeText)
+              val fixed = ProfitEngine.parseNominal(fixedText)
+              val packing = ProfitEngine.parseNominal(packingText)
+              val ops = ProfitEngine.parseNominal(opsText)
+              val retur = ProfitEngine.parsePercent(returText)
+              val ads = ProfitEngine.parseNominal(adsText)
+              val affPercent = ProfitEngine.parsePercent(affPercentText)
+
+              val hasInput = price > 0.0
 
               val result = remember(price, cogs, fee, fixed, packing, ops, retur, ads, affPercent, targetMargin) {
                   ProfitEngine.calculate(
@@ -835,69 +897,86 @@ jobs:
 
                   Spacer(Modifier.height(18.dp))
 
-                  val (statusBg, statusColor) = when (result.status) {
-                      "SEHAT" -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
-                      "TIPIS" -> Color(0xFFFFF3E0) to Color(0xFFE65100)
-                      else -> Color(0xFFFFEBEE) to Color(0xFFC62828)
-                  }
+                  if (!hasInput) {
+                      Card(
+                          modifier = Modifier.fillMaxWidth(),
+                          colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F5F9)),
+                          shape = RoundedCornerShape(12.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                              Text(
+                                  "Masukkan Harga Jual untuk melihat analisis profit & batas aman iklan.",
+                                  color = Color(0xFF64748B),
+                                  fontSize = 13.sp,
+                                  fontWeight = FontWeight.Medium
+                              )
+                          }
+                      }
+                  } else {
+                      val (statusBg, statusColor) = when (result.status) {
+                          "SEHAT" -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
+                          "TIPIS" -> Color(0xFFFFF3E0) to Color(0xFFE65100)
+                          else -> Color(0xFFFFEBEE) to Color(0xFFC62828)
+                      }
 
-                  Card(
-                      modifier = Modifier.fillMaxWidth(),
-                      colors = CardDefaults.cardColors(containerColor = statusBg),
-                      shape = RoundedCornerShape(12.dp)
-                  ) {
-                      Column(modifier = Modifier.padding(16.dp)) {
-                          Row(
-                              modifier = Modifier.fillMaxWidth(),
-                              horizontalArrangement = Arrangement.SpaceBetween,
-                              verticalAlignment = Alignment.CenterVertically
-                          ) {
-                              Column {
-                                  Text("HASIL PROFIT", fontSize = 11.sp, color = statusColor, fontWeight = FontWeight.Bold)
-                                  Text(
-                                      ProfitEngine.formatRupiah(result.netProfit),
-                                      fontSize = 22.sp,
-                                      fontWeight = FontWeight.Bold,
-                                      color = statusColor
-                                  )
-                              }
-                              Surface(
-                                  color = statusColor,
-                                  shape = RoundedCornerShape(8.dp)
+                      Card(
+                          modifier = Modifier.fillMaxWidth(),
+                          colors = CardDefaults.cardColors(containerColor = statusBg),
+                          shape = RoundedCornerShape(12.dp)
+                      ) {
+                          Column(modifier = Modifier.padding(16.dp)) {
+                              Row(
+                                  modifier = Modifier.fillMaxWidth(),
+                                  horizontalArrangement = Arrangement.SpaceBetween,
+                                  verticalAlignment = Alignment.CenterVertically
                               ) {
-                                  Text(
-                                      result.status,
-                                      color = Color.White,
-                                      modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                      fontWeight = FontWeight.Bold,
-                                      fontSize = 12.sp
-                                  )
+                                  Column {
+                                      Text("HASIL PROFIT", fontSize = 11.sp, color = statusColor, fontWeight = FontWeight.Bold)
+                                      Text(
+                                          ProfitEngine.formatRupiah(result.netProfit),
+                                          fontSize = 22.sp,
+                                          fontWeight = FontWeight.Bold,
+                                          color = statusColor
+                                      )
+                                  }
+                                  Surface(
+                                      color = statusColor,
+                                      shape = RoundedCornerShape(8.dp)
+                                  ) {
+                                      Text(
+                                          result.status,
+                                          color = Color.White,
+                                          modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                                          fontWeight = FontWeight.Bold,
+                                          fontSize = 12.sp
+                                      )
+                                  }
                               }
-                          }
 
-                          Spacer(Modifier.height(10.dp))
-                          Divider(color = statusColor.copy(alpha = 0.2f))
-                          Spacer(Modifier.height(10.dp))
+                              Spacer(Modifier.height(10.dp))
+                              Divider(color = statusColor.copy(alpha = 0.2f))
+                              Spacer(Modifier.height(10.dp))
 
-                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                              Text("Margin Profit:", fontSize = 13.sp, color = Color(0xFF334155))
-                              Text("${result.marginPercent}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
-                          }
-                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                              Text("Potongan Affiliate (${affPercent}%):", fontSize = 13.sp, color = Color(0xFF334155))
-                              Text(ProfitEngine.formatRupiah(result.affiliateNominal), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
-                          }
-                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                              Text("BEP ROAS Minimum:", fontSize = 13.sp, color = Color(0xFF334155))
-                              Text("${result.bepRoas}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
-                          }
-                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                              Text("Batas Aman Iklan (Max Ads):", fontSize = 13.sp, color = Color(0xFF334155))
-                              Text(ProfitEngine.formatRupiah(result.maxAdsLimit), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
-                          }
-                          Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                              Text("Batas Aman Komisi Affiliate:", fontSize = 13.sp, color = Color(0xFF334155))
-                              Text("${result.maxAffiliatePercentLimit}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("Margin Profit:", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text("${result.marginPercent}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                              }
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("Potongan Affiliate (${affPercent}%):", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text(ProfitEngine.formatRupiah(result.affiliateNominal), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                              }
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("BEP ROAS Minimum:", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text("${result.bepRoas}x", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                              }
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("Batas Aman Iklan (Max Ads):", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text(ProfitEngine.formatRupiah(result.maxAdsLimit), fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                              }
+                              Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                  Text("Batas Aman Komisi Affiliate:", fontSize = 13.sp, color = Color(0xFF334155))
+                                  Text("${result.maxAffiliatePercentLimit}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF334155))
+                              }
                           }
                       }
                   }
@@ -923,6 +1002,9 @@ jobs:
                                       targetAffiliatePercent = affPercent
                                   )
                               )
+                              name = ""
+                              priceText = ""
+                              cogsText = ""
                               Toast.makeText(context, "Produk berhasil disimpan!", Toast.LENGTH_SHORT).show()
                           }
                       },
@@ -968,11 +1050,11 @@ jobs:
               val afterResult by remember(baseProduct, simPriceText, simFeeText, simFixedText, simAdsText, simAffPercentText, targetMargin) {
                   derivedStateOf {
                       baseProduct?.let {
-                          val p = simPriceText.toDoubleOrNull() ?: 0.0
-                          val f = simFeeText.toDoubleOrNull() ?: 0.0
-                          val fx = simFixedText.toDoubleOrNull() ?: 0.0
-                          val a = simAdsText.toDoubleOrNull() ?: 0.0
-                          val af = simAffPercentText.toDoubleOrNull() ?: 0.0
+                          val p = ProfitEngine.parseNominal(simPriceText)
+                          val f = ProfitEngine.parsePercent(simFeeText)
+                          val fx = ProfitEngine.parseNominal(simFixedText)
+                          val a = ProfitEngine.parseNominal(simAdsText)
+                          val af = ProfitEngine.parsePercent(simAffPercentText)
                           ProfitEngine.calculate(
                               sellingPrice = p,
                               cogs = it.cogs,
@@ -1170,9 +1252,11 @@ jobs:
           fun ProdukScreen(
               products: List<ProductItem>,
               targetMargin: Double,
-              onDeleteProduct: (String) -> Unit
+              onDeleteProduct: (String) -> Unit,
+              onUpdateProduct: (ProductItem) -> Unit
           ) {
               var selectedFilter by remember { mutableStateOf("SEMUA") }
+              var editingProduct by remember { mutableStateOf<ProductItem?>(null) }
 
               val calculatedList = remember(products, targetMargin) {
                   products.map { p ->
@@ -1299,7 +1383,21 @@ jobs:
                                       )
 
                                       Spacer(Modifier.height(6.dp))
-                                      Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                      Row(
+                                          modifier = Modifier.fillMaxWidth(),
+                                          horizontalArrangement = Arrangement.End,
+                                          verticalAlignment = Alignment.CenterVertically
+                                      ) {
+                                          Text(
+                                              "Edit",
+                                              color = Color(0xFF006D5B),
+                                              fontSize = 12.sp,
+                                              fontWeight = FontWeight.Bold,
+                                              modifier = Modifier
+                                                  .clickable { editingProduct = product }
+                                                  .padding(8.dp)
+                                          )
+                                          Spacer(Modifier.width(8.dp))
                                           Text(
                                               "Hapus",
                                               color = Color(0xFFC62828),
@@ -1307,7 +1405,7 @@ jobs:
                                               fontWeight = FontWeight.Bold,
                                               modifier = Modifier
                                                   .clickable { onDeleteProduct(product.id) }
-                                                  .padding(4.dp)
+                                                  .padding(8.dp)
                                           )
                                       }
                                   }
@@ -1315,6 +1413,100 @@ jobs:
                           }
                       }
                   }
+              }
+
+              // DIALOG EDIT PRODUK
+              editingProduct?.let { prod ->
+                  var editName by remember { mutableStateOf(prod.name) }
+                  var editPrice by remember { mutableStateOf(prod.sellingPrice.toLong().toString()) }
+                  var editCogs by remember { mutableStateOf(prod.cogs.toLong().toString()) }
+                  var editFee by remember { mutableStateOf(prod.marketplaceFeePercent.toString()) }
+                  var editAds by remember { mutableStateOf(prod.targetAds.toLong().toString()) }
+                  var editAff by remember { mutableStateOf(prod.targetAffiliatePercent.toString()) }
+
+                  AlertDialog(
+                      onDismissRequest = { editingProduct = null },
+                      title = { Text("Edit Produk") },
+                      text = {
+                          Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                              OutlinedTextField(
+                                  value = editName,
+                                  onValueChange = { editName = it },
+                                  label = { Text("Nama Produk") },
+                                  modifier = Modifier.fillMaxWidth()
+                              )
+                              Spacer(Modifier.height(6.dp))
+                              OutlinedTextField(
+                                  value = editPrice,
+                                  onValueChange = { editPrice = it },
+                                  label = { Text("Harga Jual (Rp)") },
+                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                  modifier = Modifier.fillMaxWidth()
+                              )
+                              Spacer(Modifier.height(6.dp))
+                              OutlinedTextField(
+                                  value = editCogs,
+                                  onValueChange = { editCogs = it },
+                                  label = { Text("HPP / Modal (Rp)") },
+                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                  modifier = Modifier.fillMaxWidth()
+                              )
+                              Spacer(Modifier.height(6.dp))
+                              OutlinedTextField(
+                                  value = editFee,
+                                  onValueChange = { editFee = it },
+                                  label = { Text("Fee Marketplace (%)") },
+                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                  modifier = Modifier.fillMaxWidth()
+                              )
+                              Spacer(Modifier.height(6.dp))
+                              OutlinedTextField(
+                                  value = editAds,
+                                  onValueChange = { editAds = it },
+                                  label = { Text("Iklan / Order (Rp)") },
+                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                                  modifier = Modifier.fillMaxWidth()
+                              )
+                              Spacer(Modifier.height(6.dp))
+                              OutlinedTextField(
+                                  value = editAff,
+                                  onValueChange = { editAff = it },
+                                  label = { Text("Affiliate (%)") },
+                                  keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                  modifier = Modifier.fillMaxWidth()
+                              )
+                          }
+                      },
+                      confirmButton = {
+                          Button(
+                              onClick = {
+                                  val p = ProfitEngine.parseNominal(editPrice)
+                                  val c = ProfitEngine.parseNominal(editCogs)
+                                  if (editName.isNotBlank() && p > 0.0) {
+                                      onUpdateProduct(
+                                          prod.copy(
+                                              name = editName.trim(),
+                                              sellingPrice = p,
+                                              cogs = c,
+                                              marketplaceFeePercent = ProfitEngine.parsePercent(editFee),
+                                              targetAds = ProfitEngine.parseNominal(editAds),
+                                              targetAffiliatePercent = ProfitEngine.parsePercent(editAff)
+                                          )
+                                      )
+                                      editingProduct = null
+                                  }
+                              },
+                              colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006D5B))
+                          ) {
+                              Text("Simpan Perubahan")
+                          }
+                      },
+                      dismissButton = {
+                          TextButton(onClick = { editingProduct = null }) {
+                              Text("Batal")
+                          }
+                      }
+                  )
               }
           }
 
@@ -1368,8 +1560,8 @@ jobs:
                           Spacer(Modifier.height(12.dp))
                           Button(
                               onClick = {
-                                  val parsed = targetInput.toDoubleOrNull()
-                                  if (parsed != null && parsed >= 0.0) {
+                                  val parsed = ProfitEngine.parsePercent(targetInput)
+                                  if (parsed >= 0.0) {
                                       onSaveTargetMargin(parsed)
                                       Toast.makeText(context, "Target margin disimpan!", Toast.LENGTH_SHORT).show()
                                   } else {
@@ -1438,7 +1630,7 @@ jobs:
                   ) {
                       Column(modifier = Modifier.padding(16.dp)) {
                           Text(
-                              "Profit Control V1.0.2",
+                              "Profit Control V1.0.3",
                               fontWeight = FontWeight.Bold,
                               fontSize = 14.sp,
                               color = Color(0xFF1E293B)
@@ -1472,8 +1664,8 @@ jobs:
                                   value = backupJsonText,
                                   onValueChange = { backupJsonText = it },
                                   modifier = Modifier
-                                  .fillMaxWidth()
-                                  .height(150.dp),
+                                      .fillMaxWidth()
+                                      .height(150.dp),
                                   textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp)
                               )
                               Spacer(Modifier.height(6.dp))
@@ -1524,5 +1716,5 @@ jobs:
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ProfitControl-V1.0.2-Fixed
+          name: ProfitControl-V1.0.3-ReleaseCandidate
           path: app/build/outputs/apk/debug/app-debug.apk
